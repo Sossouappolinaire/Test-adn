@@ -1,0 +1,126 @@
+# Plan du code — où se trouve quoi
+
+Ce fichier sert de plan : une ligne par module, rangé par rôle. Chaque module est un fichier `.js` à la racine ; l'interface (menu, pages, formulaires) est dans `public/index.html`.
+
+## Comment une prédiction circule
+
+1. `predictor.js` lit les jeux, appelle chaque stratégie de `strategies.js` (`detect`) et crée la prédiction.
+2. `bot.js` décide où l'envoyer (public / silencieux, via `canSend`) et l'envoie à Telegram. **Tous les envois passent par `installChannelGuard` dans `bot.js`** (arrêt par canal, stabilité du jeu, suivi « Retour après perte »).
+3. `predictor.js` vérifie le résultat (✅0️⃣ ✅1️⃣ … ❌) et `bot.js` modifie le message.
+4. Les boutons de la section « automatique » (après perte, combinée, répétition, rupture, chevauchement…) observent ces résultats et publient leurs propres prédictions.
+
+## Où modifier quoi
+
+- Une stratégie de base (règle de calcul) : `strategies.js` (+ son entrée dans `LIST`). Filtres d'envoi, « série puis pause », rattrapages : `predictor.js`.
+- Le texte d'un message Telegram : `tg-formats.js` / `formats.js`.
+- Un bouton (page, formulaire) : sa page est une fonction `xxxPage()` dans `public/index.html` ; sa logique est dans le module du même nom ; ses routes sont dans `server.js` (cherche `/api/<nom-du-bouton>`).
+- Les canaux et leurs configurations : page **Envois** (`diagnosticsPage` dans `public/index.html`, routes `/api/diagnostics/…` dans `server.js`).
+
+## Serveur, démarrage et accès
+
+- `server.js` — tableau de bord web (Render) + API JSON. Protégé par identifiant/mot de passe.
+- `api.js` — lecture de l'API 1xbet Baccara (LiveFeed/GetChampZip)
+- `bootstrap.js` — point d'entrée réel (voir package.json : "start": "node bootstrap.js").
+- `auth.js` — protection du tableau de bord web
+- `session-store.js` — stockage des sessions « base de données + mémoire ».
+- `config.js` — réglages généraux du service.
+- `version.js` — Numéro de version de CE ZIP : affiché sur le site (Accueil, Aide, Envois) et dans /api/version.
+- `store.js` — persistance simple (token du bot, canaux, seuil B) dans data.json
+- `paiement.js` — Paiement en ligne via des LIENS FIXES Money Fusion, un par
+- `sebpay.js` — client de l'API SebPay (https://sebpay.bj), second fournisseur
+- `shop.js` — Boutique de stratégies : chaque stratégie publiée par l'admin
+- `deploy-generator.js` — panneau admin « Déploiement ».
+- `database-url.js` — lien de la base de données PostgreSQL (Render).
+- `db.js` — persistance PostgreSQL (Render) : jeux passés par date, prédictions, réglages
+- `data-transfer.js` — export/import de TOUTE la configuration du bot (tokens
+- `auto-import.js` — import AUTOMATIQUE du classeur de configuration au démarrage
+- `midnight-reset.js` — « NOUVEAU DÉPART » chaque jour à 00h00 heure d'Abidjan
+- `cleanup.js` — NETTOYAGE AUTOMATIQUE (toutes les 60 min) : sauvegardes `.repair-backups`, fichiers temporaires, lignes de base expirées (anti-doublons, sessions, codes e-mail, vieilles analyses/annonces/prédictions), historiques démesurés de `data.json` ; routes admin `/api/cleanup`, `/api/cleanup/run`, `/api/cleanup/config` ; `CLEANUP=off` pour le couper.
+
+## Cœur : jeux, stratégies, vérification
+
+- `predictor.js` — moteur multi-stratégies (main du JOUEUR uniquement)
+- `strategies.js` — catalogue des stratégies de prédiction (main du JOUEUR uniquement)
+- `formats.js` — adaptateur entre le moteur du bot et les 77 formats de tg-formats.js
+- `tg-formats.js` — Formats de messages Telegram pour Baccarat Pro (N°1 à N°107)
+- `tg-formats-uniques.js` — Formats N°8 à N°86 : 79 mises en page toutes différentes (aucune ne ressemble à une autre)
+- `game-stability.js` — « Stabilité du jeu » (fonction DÉSACTIVÉE PAR DÉFAUT, à activer sur le site : page « Stabilité »).
+- `early-verify.js` — VÉRIFICATION ANTICIPÉE (demande admin).
+- `send-delay.js` — RETARD D'ENVOI des prédictions (demande admin).
+- `prediction-control.js` — interrupteur « arrêter / démarrer / planifier
+- `prediction-delivery.js` — Registre commun des envois de prédictions.
+- `status-animator.js` — animation du statut « En cours » des prédictions Telegram.
+- `loss-notice.js` — message automatique envoyé dans le MÊME canal qu'une
+- `cumulative.js` — analyse CUMULATIVE par paliers de 4 jeux
+- `day-compare.js` — comparaison des statistiques des JOURS ANTÉRIEURS et
+- `bilan-chart.js` — COURBE DE VARIATIONS envoyée après chaque bilan (demande admin).
+- `shoe-report.js` — rapport PDF envoyé automatiquement à chaque nouveau sabot
+
+## Telegram : envoi, canaux, bot
+
+- `bot.js` — bot Telegram + boucle de prédiction/vérification
+- `channel-discovery.js` — détection des canaux connus (v141, ex-`like-react.js`) : lit les réglages de tous les boutons ; utilisée par la liste unique de canaux de `server.js`. Le bouton « J'aime » a été supprimé en v141.
+- `copy-announce.js` — bouton « Copie et annonce » (demande admin).
+
+## Boutons de prédiction automatique (déclencheurs)
+
+- `after-loss.js` — panneau « Prédiction après perte » :
+- `combined.js` — bouton « Prédiction combinée pour costume joueur » :
+- `suit-streak.js` — nouveau bouton « Série de costume » (demande admin) :
+- `suit-break.js` — nouveau bouton « Rupture de costume » (demande admin) :
+- `overlap.js` — nouveau bouton « Chevauchement de prédictions » (demande
+- `mirror-counter.js` — « Taux Miroir » : compte, pour CHAQUE carte
+- `bet-type.js` — bouton « Type de mise » (demande admin).
+- `vip.js` — nouveau bouton « VIP » (demande admin) :
+- `cards-count.js` — nouveau bouton « Comptage 2/2 » (demande admin).
+- `draw-two-three.js` — nouvelle stratégie « Nul / 2-3 » (demande admin).
+- `victoire-vb.js` — stratégie « Victoire V1 / V2 » (demande admin) : V1 = victoire du joueur, V2 = victoire du banquier, un seul message à deux côtés, attente de l'autre puis relance à N+3, déclencheurs trouvés et appliqués par l'analyse.
+- `parity-counter.js` — « Compte parité » (bouton de l'accueil) : fin du numéro de jeu 0-9 rangée selon la parité du point du joueur / banquier (blocs pair et impair), un message par côté, reset périodique.
+- `distribution-counter.js` — « Compte distribution » (v100) : jumeau de `parity-counter.js`, compte 2/2, 3/2, 3/3, 2/3, 2k, 3k par fin de numéro, joueur / banquier, pair / impair ; `counter-details.js` fournit le bloc DÉTAILS des bilans (pair / impair, fins élevées / basses, chiffre le plus fréquent) aux deux compteurs.
+- `parity-palier.js` — « Palier parité » (v114, bouton Stratégies) : lit le palier du Compte parité (`parity-counter.js` → `palier()`), figé par dizaine dès la fin de la main du joueur au jeu x9 et utilisé pour la dizaine suivante, sans attendre le banquier ; prédit le costume au plus faible pourcentage de la ligne (seulement s'il est seul au plus faible), 3 rattrapages, une prédiction à la fois : costume venu à +k → suivante à N+k+1, jamais venu → N+4.
+- `suit-consecutive.js` — réglage « Costume déjà venu N fois de suite → son inverse » (v132) partagé par `parity-palier.js` et `parity-egalite.js` : `decide(jeuVisé, costume, N)` regarde la main du joueur des N jeux juste avant le jeu visé ; costume venu à chacun → inverse (❤️ ↔ ♣️, ♦️ ↔ ♠️) ; `wait` tant que ces jeux ne sont pas tous connus ; 0 = désactivé.
+- `end-digit-predict.js` — « Prédiction fin de numéro » (v101) : prédit le meilleur costume du joueur de `end-digit.js` et vérifie en silence s'il valide ; s'il ne valide pas → plus faible + inverse du meilleur, jusqu'à ce que le meilleur revalide (état par fin de numéro).
+- `end-digit.js` — « Analyse fin de numéro » (+ cache synchrone `cached()` utilisé par la stratégie `finNumero` de `strategies.js`) : costume le plus fréquent par chiffre final du numéro de jeu (0-9), joueur et banquier.
+- `absence-alert.js` — « Alerte absence » : message dans le chat privé de l'admin quand un costume est absent N jeux de suite (15 par défaut) ; branché dans `setOnFinished` (bot.js).
+- `channel-loss-gate.js` — « Envoi après perte » par canal, planifié jour par jour dans la feuille `PlanningEnvoi` de l'Excel (Date | Canal | Mode) ; branché dans `installChannelGuard` (bot.js) et alimenté par `updateResult`.
+- `channel-admin.js` — commande `/envois [nom]` (chat privé de l'admin) : stratégies et configurations liées à un canal, avec activer / pause / supprimer / renommer / changer de canal ; utilise les mêmes fonctions que « Envois » (fournies par `server.js`).
+- `slow-mode.js` — « Ralentisseur » : retient une prédiction jusqu'au début du jeu précédent ; branché dans `installChannelGuard` (bot.js), donc valable pour toutes les stratégies.
+- `statistics.js` — nouveau bouton « Statistiques » (demande admin) : ce
+
+## Boutons à configurations suivies (Meilleur / Dizaine / Costume faible…)
+
+- `best-weak-top.js` — « Meilleur + plus faible » : deux modes de configuration, pour les deux stratégies
+- `dizaine-top.js` — stratégie « Dizaine — costume le plus / le moins sorti »
+- `costume-faible-top.js` — stratégie « Costume faible sur 2 cartes (miroir) »
+- `best-weak-top.js` (mode « bilan », v113) — bouton « 🏆 Meilleur selon le bilan » : classement figé à chaque bilan du canal (`strategy-recap.js` → `onBilan`), meilleur jusqu'au bilan, 2ᵉ meilleur après une perte jusqu'au bilan suivant, heure de démarrage Abidjan ; page `bilanPage()` dans `public/index.html`
+- `loss-return.js` — bouton « Retour après perte » (v47, demande admin) :
+- `loss-relaunch.js` — bouton « Relance après perte » : suit des canaux ou des configurations Relance ; dès que la main du joueur du dernier rattrapage est complète, une perte → même costume à N+R+D dans le canal choisi (D=1 = jeu suivant).
+- `confirmation.js` — bouton « Confirmation » (v140) : on coche des canaux qui ont 3 ou 4 rattrapages ; perte ou ✅ au rattrapage déclencheur ou plus (réglable, 4 par défaut ; v144 : seuil ≥ N) d'une de leurs prédictions → la PROCHAINE prédiction du canal est envoyée dans l'autre canal (format au choix, rattrapages du canal suivi), vérifiée et éditée ✅ / ❌ ; branché dans `bot.js` (channel_post, point d'envoi unique, tick) et `server.js` (`/api/confirmation`).
+- `apk-call.js` — bouton « 📞 Appel APK » (v145) : on choisit le(s) canal(aux) surveillé(s) par l'application Android ; chaque prédiction lancée dans ce canal (lue depuis bot.js `onOwnPost` / `onChannelPost`) est écrite dans la table Supabase `apk_calls` (créée par le site, lecture seule pour l'APK) ; l'APK sonne comme un appel entrant jusqu'à ce qu'on décroche. SQL de secours : `apk-call.sql`.
+- `canal-telegram.js` — bouton « Canal Telegram » (v99) : un canal = une stratégie (nom du canal) ; lecteur universel `parseUniversal` (n° de jeu + costume, tous formats) ; vérification uniforme (main du joueur, rattrapages réglés par canal) ; statistiques par canal ; branché dans `bot.js` (channel_post, point d'envoi unique, tick) et `server.js` (`/api/canal-telegram`).
+- `channel-uniform.js` — « Canal Telegram » (v103) : liste à cocher de tous les canaux qui reçoivent des prédictions ; par canal coché : format unique (réécriture au point d'envoi unique de `bot.js`, à partir du registre `locateRendered` de `formats.js`), rattrapage unique (`maxRFor` dans `predictor.js`), bilan toutes les 2 h (`strategy-recap.js`, `setChannelEnabled(id, on, 2)`) ; routes `/api/channel-uniform/…` dans `server.js`.
+- `prev-suit.js` — bouton « Costume N-1 → +4 » : stratégies / configurations cochées (liste fournie par server.js) ; costume prédit à N venu à N-1 et absent à N → même costume à N+4 dans le canal choisi.
+- `trefle-miroir.js` — « Trèfle ×3 » : TRIO DE CANAUX (v153) — canal 1 = ♣️ uniquement (déclencheurs fixes + calcul ♣️, pris en charge ici quand le calcul est activé), canal 2 = calcul (envoyé par le moteur), canal 3 = image inverse du canal 2 ; et, avant, IMAGE INVERSE du calcul IB × 0,21 (v150). Si l'option est cochée dans la page de la stratégie, chaque prédiction du calcul est doublée dans un autre canal par son image (❤️ ↔ ♣️, ♦️ ↔ ♠️) ; vérifiée et éditée à part ; branché dans `bot.js` (`broadcast`, tick) et `server.js` (`/api/trefle-miroir`).
+- `formation.js` — bouton « Formation » (page Analyseur IA)
+- `formation-relay.js` — « Envoyer la formation dans le canal »
+
+## Intelligence artificielle
+
+- `ai-analyzer.js` — analyseur Baccarat
+- `ai-auto.js` — analyseur automatique en temps réel
+- `ai-qa.js` — « Poser une question à l'IA » : réponses fondées sur les VRAIES
+- `ai-repair.js` — « Réparation IA » : l'IA (Groq) lit le code du projet, écrit
+- `strategy-advisor.js` — panneau « Avis IA sur les stratégies existantes »
+- `pattern-miner.js` — découverte de NOUVELLES stratégies (au-delà des stratégies existantes)
+- `predit.js` — panneau « Prédit » : prédictions automatiques haute fiabilité
+
+## Jeu 21
+
+- `game21.js` — lecture des jeux « 21 » (TwentyOne) de 1xbet + moteur d'analyse
+- `game21-predict.js` — panneau « Prédiction IA jeu 21 »
+- `game21-strategies.js` — création et suivi des STRATÉGIES IA du jeu « 21 ».
+
+## Accueil du site (menu)
+
+L'accueil est rangé par thèmes : Pilotage et envois · Stratégies de prédiction · Prédictions automatiques · Analyse des pertes · Suivi, statistiques et communauté · Intelligence artificielle · Jeu 21 · Système. Les mêmes thèmes sont repris dans la page Aide.
+- `analyse-manque.js` — bouton « Analyse manque » (v133) : costume absent N jeux de suite (4 par défaut) dans la main du joueur → « 🚨 ALERTE JOUEUR », puis « ✅ RÉAPPARITION JOUEUR » avec le nombre de jeux manqués (v138 : + 🃏 2/3 ou 🤝 nul si le jeu de la réapparition l’est ; routes config/détection/test ouvertes à tout compte connecté) ; envoi avec le token du site (bot principal) vers l’ID de chat réglé sur la page (vide = chat privé admin), état persistant (data.json + base).

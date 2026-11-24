@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: bot-baccara-1xbet
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    # Aucune variable d'environnement à renseigner : tout est intégré au code
+    # (base Supabase dans db-link.js) ou se règle depuis le site (Réglages).

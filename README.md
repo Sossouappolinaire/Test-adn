@@ -1,0 +1,552 @@
+# Baccara Control Room
+
+Bot Baccarat 1xbet avec tableau de bord web, moteur multi-stratégies, séparation
+des canaux Telegram et analyseur guidé par Pollinations.ai.
+
+## Déploiement (aucune variable d'environnement)
+
+1. Crée un service Web Node depuis ce dossier.
+2. Commande de build : `npm install`
+3. Commande de démarrage : `npm start`
+4. Health check : `/health`
+5. **Ne renseigne aucune variable d'environnement** : la base est intégrée (`db-link.js`) ; le token
+   Telegram, l'ID administrateur et les canaux se saisissent depuis **Réglages** dans le site.
+
+Le site est ouvert à tous : aucune connexion ni aucun compte. Les variables (`BOT_TOKEN`, `ADMIN_ID`,
+`CHAMP_ID`, `API_HOSTS`, clés IA…) restent reconnues mais sont entièrement facultatives.
+
+### Flux 1xBet
+
+Le flux public utilisé par cette application n'est pas une API officielle 1xBet.
+Le projet utilise actuellement `https://1xbet.cd/service-api`, avec le championnat
+Baccarat `2050671`. Le module `api.js` découvre automatiquement le nouvel identifiant
+quand 1xBet le remplace, et affiche désormais le statut HTTP ou le type de réponse
+dans `lastError` au lieu de transformer une page Cloudflare en simple liste vide.
+
+### 🔎 Détection auto des canaux (bouton d'accueil « Détection auto »)
+
+Le bot repère tout seul les canaux qui publient le format à deux costumes :
+
+```
+♦️ 100%─────┐
+            ├ N°1438
+♣️ 92% ─────┘
+```
+
+- La détection se fait à la lecture des publications de canal : le bot doit être **administrateur** du canal ; le canal
+  apparaît dans la liste dès qu'un message de ce format y est publié (les messages déjà édités avec ✅0️⃣ / ❌ sont reconnus aussi).
+- On sélectionne un canal détecté, puis on règle : ID du canal Telegram d'envoi, nombre de rattrapages, format de prédiction.
+- Surveillance : une fois la main du joueur terminée au jeu N, si le **1ᵉʳ** costume est sorti directement (✅0️⃣) et pas le
+  2ᵉ, le 2ᵉ est prédit à **N+2** ; si c'est le 2ᵉ qui est sorti directement et pas le 1ᵉʳ, le 1ᵉʳ est prédit à N+2.
+  Les deux sortis, ou aucun : rien n'est envoyé. Si N+2 est déjà joué, rien n'est envoyé non plus.
+
+### Bouton « Meilleur + plus faible » : vérification des deux costumes
+
+Après vérification, le message garde les deux costumes avec leur résultat respectif (rattrapages jusqu'au nombre configuré) :
+
+```
+♦️✅0️⃣ 100%
+ ┣━ N°1438
+♣️✅3️⃣ 92%
+```
+
+Un costume encore en vérification affiche ⏳, un costume jamais sorti affiche ❌. La configuration compte une victoire dès
+qu'un costume sort, une perte seulement si aucun ne sort.
+
+### Canal des meilleures prédictions : « seulement ce canal » (page Costume faible)
+
+Un menu liste les canaux (4 canaux d'une configuration, ou configurations classiques). Si l'un d'eux est choisi, le canal des
+meilleures ne reçoit QUE ses prédictions, et seulement quand il est le meilleur du moment : si le meilleur est un autre canal,
+rien n'est envoyé. « Tous les canaux » rétablit le comportement habituel.
+
+## Persistance PostgreSQL
+
+Au démarrage, le service crée ou met à jour automatiquement ses tables. La base
+conserve :
+
+- les jeux terminés et leurs cartes, points et résultats ;
+- chaque prédiction des stratégies, son statut et ses rattrapages ;
+- toutes les configurations globales et les configurations individuelles des stratégies ;
+- les stratégies découvertes par l'IA, les analyses IA complètes et le panneau « Prédit » ;
+- les réglages du bot, les canaux et l'état de l'analyse automatique.
+
+Le fichier `data.json` n'est qu'un secours local lorsque PostgreSQL est indisponible.
+En déploiement, la base est la source de vérité et les données IA sont relues après
+chaque redémarrage.
+
+## Fonctionnalités
+
+- Accueil simplifié avec accès par boutons aux stratégies, à l'analyseur IA et
+  aux 87 formats Telegram.
+- Analyseur Pollinations.ai : étude des jeux passés, fréquences de costumes,
+  séries, absences, parité et propositions de règles testables.
+- Les propositions IA sont enregistrées comme plans inactifs : aucune règle
+  générée n'est activée automatiquement.
+- Chaque stratégie possède un **canal public** et un **canal silencieux**.
+- Une prédiction silencieuse ne part que vers le canal silencieux.
+- Une prédiction activée après le filtre double perte ne part que vers le canal
+  public.
+- Le même identifiant est refusé dans les deux catégories pour éviter les
+  doublons de routage.
+- La vérification reste basée sur la main du joueur ; la main du banquier est
+  conservée pour le contexte et les statistiques.
+- Le bouton « Test » suit une stratégie Dizaine ou Costume faible. On choisit 2 à
+  4 rangs parmi : le meilleur, le 2ᵉ, le 3ᵉ, le plus faible. On commence par le
+  premier, on y reste tant qu'il gagne ; après une perte, la prochaine prédiction
+  vient du rang suivant (avec 2 rangs : meilleur ↔ 2ᵉ meilleur, en boucle). Le
+  format, le canal et les rattrapages sont configurables ; le message garde le
+  format choisi une fois le résultat connu. Les configurations Test sont
+  exportées et importées avec le panneau « Meilleur + plus faible ».
+
+## Utilisation
+
+Ouvre le tableau de bord sur l'URL du service Render :
+
+- `/#/` : accueil
+- `/#/strategies` : catalogue et réglages
+- `/#/test` : configuration du suivi meilleur / 2ᵉ meilleur
+- `/#/ai` : analyseur et création de plans
+- `/#/formats` : aperçu des formats
+- `/#/settings` : token Telegram, base et réglages globaux
+
+Après avoir ajouté le bot comme administrateur dans les canaux Telegram,
+renseigne chaque ID dans la fiche de la stratégie correspondante. Utilise les
+boutons de test pour vérifier séparément le canal public et le canal silencieux.
+
+## Commandes Telegram conservées
+
+`/live`, `/stats`, `/reglages`, `/canaux`, `/activer`, `/desactiver`,
+`/setb`, `/setmaxr`, `/setformat`, `/formats`, `/apercu`, `/settemplate`,
+`/setdb`, `/jeux`, `/base`, `/dates`, `/derniers`, `/jeu`, `/pred` et les
+commandes de stratégie existantes restent disponibles.
+
+## Avertissement
+
+Les statistiques et les analyses IA décrivent uniquement un historique observé.
+Elles ne garantissent pas le résultat d'un jeu et ne doivent pas être présentées
+comme une certitude.
+
+## Version 6.1 — Comptage 2/2
+
+- L'analyse du lot compare toujours **3/2, 3/3 et 2/2**. Une case cochée
+  autorise uniquement la prédiction de cette catégorie : si une autre catégorie
+  est la plus faible, aucune prédiction n'est envoyée.
+- Le nombre de prédictions par lot est configurable de 1 à 10. Pour le lot
+  1→30 : `1` programme le jeu 35, `2` programme 35 et 45, `3` programme 35,
+  45 et 55. Les lots suivants suivent la même règle avec un intervalle de 10.
+- Chaque cible conserve sa propre vérification et affiche `✅0️⃣`, `✅1️⃣`, etc.
+
+## Analyseur IA
+
+Les adresses publiques de l'API sont définies dans `config.js` :
+
+- Base : `https://gen.pollinations.ai`
+- Texte : `https://gen.pollinations.ai/v1/chat/completions`
+- Image : `https://gen.pollinations.ai/image/{PROMPT}?model=flux`
+- Vidéo : `https://gen.pollinations.ai/video/{PROMPT}?model=veo&duration=4`
+- Audio : `https://gen.pollinations.ai/audio/{TEXT}?voice=nova`
+- Modèles : `https://gen.pollinations.ai/v1/models`
+
+La clé se fournit avec `POLLINATIONS_API_KEY` ou à chaud depuis la page
+« Analyseur IA ». Sans clé valide, le moteur local continue d'analyser seul, en
+temps réel.
+
+L'analyseur tourne automatiquement : analyse locale toutes les 15 s, enrichissement
+Pollinations.ai toutes les 3 min. Chaque constat apparaît dans « Résultats », chaque
+stratégie trouvée est enregistrée (désactivée) dans « Stratégies IA créées ».
+
+La page « Envois » vérifie, pour chaque stratégie et chaque panneau secondaire,
+le token du bot, les canaux réellement utilisés, le droit de publier et la
+dernière erreur d'envoi. Elle détaille aussi les configurations suivies
+(après-perte, combinée, séries/ruptures), les deux sorties du jeu 21 et les
+catégories 3/2, 3/3 et 2/2 du comptage. La liste consolidée indique toutes les
+sources d'un même canal et les fallbacks globaux éventuels.
+
+`/stop` est un arrêt global : il bloque les nouveaux envois de toutes les
+stratégies et de tous les panneaux, y compris les bilans et la file « ombre ».
+Les prédictions déjà publiées restent vérifiées et leurs messages peuvent être
+mis à jour avec leur résultat. Une stratégie configurée ne retombe plus
+implicitement sur `activeChannels` : son canal doit apparaître explicitement
+dans la page « Envois ».
+
+## Version 3.2 — corrections
+
+1. **Nouveau sabot (retour au jeu n°1)** : la mémoire des jeux est remise à zéro
+   automatiquement (`resetShoe`). Avant, l'ancien numéro (ex. #1440) restait le
+   « dernier tour terminé » : toutes les nouvelles cibles (#1, #2…) étaient vues
+   comme déjà jouées et **plus aucune prédiction ne sortait après le bilan**.
+2. **Déblocage automatique après 10 minutes** : toute stratégie bloquée en mode
+   silencieux est débloquée seule au bout de `autoUnlockMin` minutes (10 par
+   défaut, réglable, 0 = jamais). Déblocage manuel : bouton « Débloquer »,
+   `POST /api/strategies/:key/unlock` ou `/debloquer <clé|tout>` sur Telegram.
+3. **Mode silencieux réglable** : `lossTrigger` = nombre de pertes avant
+   d'ouvrir l'envoi. `1` = envoi dès la première perte (avant, 2 pertes étaient
+   toujours exigées, d'où l'attente).
+4. **Prédiction dans l'ombre / Carte absente** : le comptage d'absence ne
+   s'arrêtait plus dès qu'un tour manquait dans le flux (trous tolérés) ; la
+   stratégie « absence ≥ 4 puis retour → +4 » prédit désormais réellement.
+5. **Analyse cumulative** : paliers 1→4, 1→8, 1→12 … jusqu'au jeu 1440.
+6. **Nouveau panneau « Avis IA sur les stratégies existantes »** : avis et
+   conseils cumulés (`/api/ai/strategy-advice`).
+
+
+## Panneau « Prédit » (nouveau)
+
+- Page web : onglet **Prédit** (`#/predit`).
+- L'analyseur IA tourne en continu. Dès qu'une règle atteint **100 % de réussite**
+  sur au moins N observations (réglable), elle est **certifiée** et entre dans le panneau.
+- Chaque prédiction d'une stratégie certifiée est envoyée dans le **canal Telegram du panneau**
+  (indépendant des canaux des autres stratégies).
+- Si une **deuxième** stratégie atteint aussi 100 % pendant que la première reste à 100 %,
+  les deux prédisent automatiquement ; quand elles visent le même jeu avec le même costume,
+  le message part en **double confirmation**.
+- Dès qu'une stratégie certifiée perd une prédiction, elle est retirée automatiquement du panneau.
+- API : `GET /api/predit`, `POST /api/predit/config`, `POST /api/predit/channel`,
+  `DELETE /api/predit/channel`, `POST /api/predit/test`, `POST /api/predit/scan`.
+
+## Correctif : les deux modes silencieux (intervalle 0-4, max = 4)
+
+### 1ᵉʳ mode silencieux (filtre « double perte », `silent` + `lossInterval`)
+- **Phase 1** : aucune référence, on attend la 1ʳᵉ perte → elle devient la référence.
+- **Phase 2** : on mesure l'écart (prédictions terminées) depuis la référence.
+  - perte avec écart **≥ intervalle max (4)** → trop loin : elle devient la **nouvelle référence** ;
+  - perte avec écart **< 4** → **confirmée**, `N = écart` → phase 3.
+- **Phase 3** : décompte silencieux ; la prédiction en **position N** est envoyée publiquement.
+  Une perte avant la position N interrompt le décompte et devient la nouvelle référence.
+  `N = 1` → la prédiction suivante part directement.
+
+### 2ᵉ mode silencieux (`silenceMode` + `silenceInterval`)
+Même détection de référence et d'intervalle, mais **aucun décompte** : il ne compte ni la 1ʳᵉ
+ni la 2ᵉ prédiction. Dès que la 2ᵉ perte tombe **dans l'intervalle**, la prédiction du
+**jeu suivant** est envoyée dans le canal silencieux (`silenceCount` prédictions au total).
+`silenceOffset` n'est plus utilisé (conservé pour compatibilité).
+
+
+## Version 3.3 — vérification complète et priorité du mode silencieux
+
+### Bugs corrigés
+1. **`/jeu <n>` répondait deux fois** : la commande était captée à la fois par
+   `/live` et par la fiche d'un jeu de la base. `/jeu` seul = jeu en cours,
+   `/jeu 1234` = fiche du jeu dans la base.
+2. **`/strategies` déclenchait aussi `/strategie`** (double réponse) : la
+   commande `/strategie` n'accepte plus le pluriel.
+3. **Canal présent dans les deux listes** : quand le même identifiant était
+   enregistré en public ET en silencieux, la liste publique était vidée et
+   **plus aucune prédiction publique ne partait**. Désormais le canal public
+   est prioritaire et le doublon est simplement retiré de la liste silencieuse.
+4. **Déblocage automatique qui court-circuitait « ombre »** : au bout de 10 min
+   la stratégie était armée sans avoir suivi ses phases. Supprimé pour
+   « ombre » (`autoUnlockMin` forcé à 0).
+5. Toutes les routes HTTP (`/api/...`) et toutes les commandes Telegram
+   documentées ont été testées : elles répondent toutes.
+
+### Priorité du mode silencieux pour la stratégie « ombre »
+- Le mode silencieux est **toujours actif** et **non désactivable** pour
+  « ombre » ; il passe **avant** tout autre filtre.
+- Aucun déblocage automatique : seules les phases 1 → 2 → 3 ouvrent le canal
+  public (le déblocage manuel `/debloquer ombre` reste possible).
+- Si le déclencheur automatique est activé, il ne peut qu'**ajouter** une
+  condition : la prédiction ne part en public que si le filtre silencieux est
+  en phase 3 **et** que le déclencheur est armé.
+- Tant que le filtre n'est pas ouvert, la prédiction part **uniquement dans le
+  canal silencieux** ; le champ `priority` de l'API vaut `silencieux`.
+
+### `/ombrecompte` — suivi dynamique
+Recalculé à chaque appel (aucun cache), il affiche :
+- la **phase actuelle** (1 attente de la 1ʳᵉ perte · 2 référence posée et mesure
+  de l'écart · 3 décompte silencieux puis envoi public) ;
+- la perte de **référence** (#N) et l'**écart** mesuré depuis celle-ci ;
+- le nombre de **pertes confirmées** sur le total requis (`lossTrigger`) ;
+- la **position N** à atteindre et le décompte `seen/N-1` en phase 3 ;
+- le **canal utilisé pour la prochaine prédiction** (public ou silencieux) ;
+- les réglages en cours et, le cas échéant, l'état du déclencheur automatique.
+Les mêmes informations sont exposées sur `GET /api/ombre` et `GET /api/gates`.
+
+## Version 3.4 — stratégies IA visibles + bilan complet
+
+### Nouvelles commandes Telegram
+- `/ia [n]` — liste des stratégies **créées par l'IA** : taux actuel, **taux le
+  plus bas jamais observé**, nombre de mesures, déclencheur, cible, origine.
+- `/ia90 [seuil]` — uniquement les stratégies **à 90 % ou plus qui ne sont
+  jamais descendues** sous ce seuil (`rateMin >= seuil`). Alias : `/elite`.
+- `/iabilan` — bilan des prédictions IA (panneau « Prédit »).
+- `/bilan` — publication immédiate du bilan complet (admin).
+
+Le taux de chaque stratégie IA est désormais **remesuré à chaque analyse** :
+avant, une stratégie déjà connue était ignorée et son taux restait figé, il était
+donc impossible de savoir si elle était descendue. Les champs `rateMin`,
+`rateMax`, `observations` et `rateHistory` sont enregistrés en base
+(`ai_strategies`).
+
+API : `GET /api/ai/strategies?min=90` renvoie la liste complète et la sélection
+« jamais descendue ».
+
+### Correctif : bilan manquant après le retour au jeu n°1
+Le bilan n'était envoyé que pour les stratégies dont une prédiction venait juste
+de se clôturer sur le dernier tour du sabot. Or le nouveau sabot déclenche
+`resetShoe()`, qui annule les prédictions encore en attente : plus rien
+n'arrivait dans la file d'attente et **aucun bilan ne partait**, ni pour les
+stratégies existantes, ni pour les prédictions IA (le panneau « Prédit » n'avait
+même pas de bilan Telegram).
+
+Désormais :
+1. `resetShoe()` incrémente `state.shoeSeq` : le changement de sabot est détecté
+   de façon fiable (et plus seulement via le numéro live).
+2. `flushBilans()` publie le bilan de **toutes** les stratégies ayant prédit
+   pendant le sabot, dans leurs canaux respectifs.
+3. `predit.sendBilans()` publie le bilan de **chaque stratégie IA** ayant prédit
+   plus un **bilan global IA** dans le canal du panneau « Prédit ».
+4. Déclenchement manuel : `/bilan` ou `POST /api/bilans/send`.
+
+## IA — que faire quand « Insufficient balance » s'affiche
+
+La clé Pollinations est bien configurée, mais le **solde du compte est à 0
+pollen** : l'API refuse alors chaque requête (402). Le bot bascule
+automatiquement sur les services gratuits, qui sont parfois saturés.
+
+Deux solutions :
+
+1. Recharger le compte sur https://enter.pollinations.ai (la clé actuelle
+   refonctionne aussitôt, sans redéploiement).
+2. Ou configurer un fournisseur de secours compatible OpenAI (Groq,
+   OpenRouter, OpenAI…) avec ces variables d'environnement Render :
+   - `AI_FALLBACK_URL` (ex. `https://api.groq.com/openai/v1/chat/completions`)
+   - `AI_FALLBACK_KEY`
+   - `AI_FALLBACK_MODEL` (ex. `llama-3.3-70b-versatile`)
+
+## Inscription — plus de code par email
+
+L'envoi d'un code de confirmation par Gmail a été supprimé. À l'inscription,
+le compte est créé immédiatement en statut « en attente » et une fenêtre
+« Merci de patienter » récapitule les informations. C'est l'administrateur
+qui accepte le compte et accorde un temps d'accès depuis le panneau
+« Utilisateurs ».
+
+## 🛠 Réparation IA (nouveau)
+
+Page `#/ai-repair` du tableau de bord (bouton « 🛠 Réparation IA » dans le menu et sur l'accueil).
+
+1. **Envoyer à l'IA** : on écrit ce qui ne va pas ; l'IA (Groq, `ai-repair.js`) lit l'inventaire du projet
+   et les extraits de code pertinents, puis liste les problèmes identifiés (fichier, gravité, détail).
+2. **Corriger** : l'IA corrige les problèmes un par un et écrit directement les fichiers
+   (sauvegarde automatique dans `.repair-backups/`, contrôle de syntaxe `node --check` avant écriture).
+   Le pourcentage d'avancement s'affiche et progresse jusqu'à 100 %.
+3. **Analyser** : à 100 %, le bouton d'analyse relit le code corrigé et confirme si tous les
+   problèmes sont bien réglés (score sur 100 + contrôle de syntaxe de tout le projet).
+
+Routes : `GET /api/ai/repair`, `POST /api/ai/repair/diagnose|fix|verify|reset` (administrateur uniquement).
+Clé Groq : `GROQ_API_KEY` (déjà présente dans `config.js`), modèle réglable via `GROQ_MODEL`.
+Le palier gratuit Groq limite le débit (8000 tokens/min) : les erreurs 429 sont réessayées automatiquement.
+
+## Version 1.25 — Copie et annonce
+
+- Nouvelle page `#/copy-announce` (« Copie et annonce »), module `copy-announce.js`.
+- Chaque règle : une source (stratégie existante, stratégie enregistrée — après perte, combinée, répétition, rupture, chevauchement — ou canal déjà configuré) vers un canal de destination.
+- **Copie** des prédictions publiées (mise à jour du résultat dans le canal de destination) et/ou **annonces planifiées** (intervalle en minutes : 30 min, 1 h, 3 h… ou heures pile HH:MM, heure du serveur). Les deux options peuvent être actives ensemble ou séparément.
+- Seules les prédictions publiées après l'ajout de la règle sont copiées.
+
+## Version 1.27
+
+- « Copie et annonce » : une prédiction déjà publiée et encore en attente au moment de la création de la règle est copiée tout de suite ; la copie et les annonces tournent sur leur propre minuterie (4 s), indépendante du flux de jeux ; en pause, les résultats déjà copiés continuent d'être mis à jour.
+- Nouvelle stratégie « Absence + décalage » (`absenceDecalage`) : costume absent exactement N jeux consécutifs chez le joueur → prédiction sur dernier numéro + décalage (ex. 4 absences, décalage 2 : jeux 2-5 sans ❤️ → ❤️ sur #7). Format, rattrapages et canal comme les autres stratégies.
+
+## Version 1.28 — Export Excel complet (/exporter, /importer)
+
+- Panneaux ajoutés à la feuille « Panneaux » : **Copie et annonce** et **stratégies Jeu 21** (ils n'étaient pas exportés).
+- Nouvelle feuille « Reglages » : clés Gemini / Groq / OpenRouter, analyse IA automatique, clé e-mail (Brevo), lien de base de données (jamais remplacé s'il existe déjà), liste, historique et **code source** des stratégies créées par l'IA.
+- `copy-announce.js` ajouté au générateur de déploiement.
+
+## Version 1.29 — Aucun jeu en live stocké
+
+- L'export Excel ne contient plus aucune donnée issue du jeu en cours : feuilles « Annonces », « Portes » et « Predictions » supprimées ; dans « Panneaux », les champs en direct (prédictions en attente, numéro surveillé, progression de série, bloc de comptage, dernier scan) sont retirés. À l'import, ces champs ne sont jamais écrasés.
+- Un jeu non terminé n'est jamais enregistré en base (`db.saveGame`), et le numéro surveillé par « Chevauchement » n'est plus persisté.
+- Le jeu en live n'existe qu'en mémoire vive, pour l'affichage et les stratégies.
+
+## Import automatique de la configuration (Excel)
+
+Le classeur `.xlsx` placé dans `config-import/` (celui produit par `/exporter`) est importé
+automatiquement à chaque démarrage après déploiement (module `auto-import.js`), une fois par
+version du fichier (empreinte SHA-256 en base). `AUTO_IMPORT=force` réimporte à chaque
+démarrage, `AUTO_IMPORT=off` désactive.
+
+## Animation du statut « En cours »
+
+Tous les formats de prédiction (1 à 101) sont animés tant que le résultat n'est pas connu
+(module `status-animator.js`) : sablier ⏳/⌛ qui se retourne, « En cours » écrit lettre par
+lettre avec un curseur de couleur 🔴🟠🟡🟢🔵🟣. À la vérification, l'animation s'arrête et le
+statut final (ex. ✅ 1️⃣) remplace le message. Réglages : `STATUS_ANIM=off`,
+`STATUS_ANIM_FRAME_MS` (3500 par défaut, écart mini entre deux images d'un même canal),
+`STATUS_ANIM_MAX_MS` (durée maxi, 30 min).
+
+## Vérification anticipée
+
+Dès que le costume prédit est trouvé dans la main du **joueur**, la prédiction est validée
+immédiatement (✅ + rattrapage), sans attendre la fin du jeu (module `early-verify.js`, appliqué
+au moteur principal et aux panneaux Après perte, Combiné, Chevauchement, Série, Rupture,
+Dizaine, VIP et Prédit IA). Si le costume n'est pas trouvé, on attend la fin du jeu ; une perte
+n'est jamais prononcée avant la fin du tour. Parité, nombre de cartes et vérifications sur la
+main du banquier restent vérifiées en fin de jeu. Désactivation : `EARLY_VERIFY=off`.
+
+## Retard d'envoi (par stratégie)
+
+Réglage « ⏱️ Retard d'envoi » sur la page de chaque stratégie (ou `/setstrat <clé> retard on` et
+`/setstrat <clé> delai 10`). Activé, la prédiction est calculée normalement puis retenue : elle
+part quand le jeu situé juste avant la cible est en cours, plus N secondes (10 par défaut).
+Ex. déclencheur au jeu #2, cible #4 : envoi du jeu #4 quand le jeu #3 est en cours + 10 s.
+Si le jeu cible a déjà commencé avant l'envoi, la prédiction est annulée. Désactivé par défaut ;
+`SEND_DELAY=off` désactive la fonction partout.
+
+## Intro de démarrage (personnage + mallette)
+
+L'ancienne intro « livre » est remplacée par un personnage qui entre en marchant, ramasse sa
+mallette et repart (`public/intro.js`, pages d'accueil et de connexion). Elle n'est jouée
+qu'une fois après chaque redémarrage / redéploiement du serveur : le serveur injecte un
+identifiant de démarrage (`BOOT_ID`) et le navigateur mémorise le dernier vu. Ensuite les pages
+s'ouvrent directement, sans intro. Toucher l'écran passe l'intro.
+
+## Bilan « Dizaine — costume le plus / le moins sorti »
+
+Toutes les 2 h (réglable, 1 à 24 h), à heure fixe (00h, 02h, 04h…), un bilan est envoyé dans les
+canaux des configurations actives (Telegram + canaux du site) : la meilleure configuration est
+désignée par le nom réel de son canal, classée 1ʳᵉ avec son taux sur N prédictions, suivie du
+classement. Taux de la journée en cours (fuseau `BILAN_TZ`, `Africa/Porto-Novo` par défaut) ; au
+point de minuit, bilan de la journée écoulée. Minimum 5 prédictions vérifiées dans la journée pour
+être classée (réglable). Chaque canal reçoit le bilan complet. Réglages, aperçu et envoi immédiat
+sur la page de la stratégie.
+
+## Nouveau départ de 00h00 (heure d'Abidjan)
+
+Chaque jour à 00h00 pile (`RESET_TZ`, `Africa/Abidjan` par défaut ; `MIDNIGHT_RESET=off` pour
+désactiver), `midnight-reset.js` : 1) envoie l'export Excel complet de la configuration (comme
+`/exporter`) dans le chat privé de l'administrateur (`ADMIN_ID`) ; 2) efface les DONNÉES : jeux
+stockés, prédictions, compteurs, historiques, messages en attente et bilans de chaque panneau,
+registres anti-doublon, filtres « double perte », annonces de position, analyses cumulées du jour
+(mémoire + tables `games`, `predictions`, `after_loss_sent`, `announcements`, `gates`,
+`cumulative_analyses`) ; 3) confirme à l'administrateur. AUCUNE configuration n'est touchée.
+Si le serveur dormait à 00h00, l'opération a lieu à son réveil (30 premières minutes). Un seul
+passage par jour. Les jeux déjà terminés renvoyés ensuite par le flux ne redéclenchent rien.
+
+## Bilan remis à zéro après chaque envoi
+
+Pour « Dizaine » et « Costume faible » : le compteur du bilan (`seg`) repart de **zéro** dès qu'un bilan
+a réellement été envoyé (Telegram ou canal du site). Le bilan suivant ne compte que les prédictions
+vérifiées **depuis le bilan précédent** (l'en-tête indique « Compté depuis le dernier bilan (HHhMM → HHh00) »).
+- Le compteur est gelé pendant l'envoi : les résultats qui arrivent à ce moment-là comptent déjà pour le bilan suivant.
+- Si aucun envoi n'a abouti (bot en pause, erreur partout), le compteur est remis en place : rien n'est perdu.
+- Pas de prédiction vérifiée depuis le dernier bilan → aucun bilan envoyé, le compteur continue.
+- Le compteur « du jour » (classement du jour, choix des meilleures prédictions, Excel) n'est pas touché.
+- `midnight-reset.js` remet aussi ce compteur à zéro à 00h00.
+- Le minimum de prédictions pour être classé (`minPreds`, 5 par défaut) s'applique maintenant à chaque tranche
+  entre deux bilans : avec un bilan toutes les heures, baissez-le si trop de canaux restent « pas assez de données ».
+
+## Canal du plus faible (4ᵉ du classement)
+
+Dans les panneaux « Dizaine » et « Costume faible », une nouvelle section **📉 Canal du plus faible**
+(sous « Canal des meilleures prédictions ») se configure de la même façon : ID du canal, lien, format,
+rattrapages, retard d'envoi, bienvenue et récapitulatif. Le bot y relaie les prédictions de la stratégie
+(ou du canal, en mode 4 canaux) classée au **rang 4** du classement du jour (rang réglable de 2 à 10).
+- Au moins 2 stratégies classées sont requises ; s'il y en a moins de 4, c'est la dernière classée.
+- Ce n'est jamais la même stratégie que celle du canal des meilleures.
+- Il bascule automatiquement quand le classement change (alerte privée à l'admin).
+- Réglages : `weakEnabled`, `weakChannels`, `weakLink`, `weakRank`, `weakFormat`, `weakMaxR`, `weakDelayEnabled`,
+  `weakDelaySec`, `weakWelcome`, `weakRecap`, `weakRecapMin` sur `POST /api/dizaine-top/config` et
+  `POST /api/costume-faible-top/config` ; test : `POST …/welcome/test` avec `{ "kind": "weak" }`.
+
+## Meilleur + plus faible (message à deux costumes)
+
+Bouton **🎯 Meilleur + plus faible** dans la page Stratégies. « Créer » demande la stratégie source (Dizaine ou Costume faible), puis l'ID du canal, les rattrapages et les costumes à proposer : on coche **au moins 2** (jusqu'à 4) parmi le meilleur, le 2ᵉ, le 3ᵉ et le plus faible (4ᵉ). Quand tous ceux qui sont cochés
+(Dizaine ou Costume faible), puis l'ID du canal et le nombre de rattrapages. Quand la meilleure configuration du jour et
+le plus faible (4ᵉ du classement) de cette stratégie prédisent le **même numéro de jeu**, le bot envoie :
+
+    ♦️ 85%
+     ┣━ N°464
+    ❤️ 78%
+
+(pourcentage = taux de réussite du jour). Après vérification (main du joueur, avec les rattrapages), le message est
+modifié : on garde le costume sorti (`⚜️ #464 | ♦️ | ✅0️⃣`), les deux s'ils sortent ensemble, ou `⚜️ #464 | ♦️ ❤️ | ❌`.
+Code : `best-weak-top.js` ; routes `/api/best-weak/…`.
+
+### Types de configuration « Meilleur + plus faible » (page Stratégies, carte d'accueil ⚡)
+
+Trois types, pour « Dizaine » et « Costume faible » (assistant : confirmation → stratégie → ID du canal Telegram,
+rattrapages, format de prédiction, nom) :
+- **🎯 Plusieurs costumes** : un message avec 2 à 4 costumes (meilleur, 2ᵉ, 3ᵉ, plus faible) et leur pourcentage.
+- **⚡ Déclencheurs** : prédiction simple quand une des 4 configurations enchaîne 3 pertes consécutives (configuration suivie à 3 rattrapages), ou 2 gains de suite au
+  rattrapage 2 ou 3 (→ sa prochaine prédiction), ou quand un costume est absent depuis 13 jeux (→ prédit à +1 et +5).
+- **🔁 Cycle** : on suit le meilleur tant que ses prédictions gagnent en ✅0️⃣/✅1️⃣ ; au premier ✅2️⃣/✅3️⃣ ou ❌ on passe
+  au plus faible, puis au 2ᵉ, puis au 3ᵉ. Une fois les 4 passées, le cycle ne recommence pas : on attend qu'une des 4
+  perde ; celle qui perd est suivie (sa prochaine prédiction part) et les mêmes règles s'appliquent. Une prédiction à la fois.
+
+Anti-doublons : deux configurations identiques (même type, stratégie, costumes et un canal en commun) sont refusées /
+fusionnées au chargement ; une configuration n'envoie jamais deux fois la prédiction du même jeu (mémoire persistée).
+
+### 🔄 Relance +3 (bouton « Relance +3 », page `/#/relance`)
+
+« Créer » → stratégie (Dizaine ou Costume faible) → ID du canal Telegram, rattrapages, nom, puis **1, 2 ou 3 costumes** à cocher
+parmi les 4 meilleurs (meilleur, 2ᵉ, 3ᵉ, plus faible). Avec 2 cochés :
+
+    ♣️ 95%
+     ┣━ N°1135
+    ♦️ 94%
+
+**Règle** : dès qu'un costume est sorti, **peu importe le rattrapage** (✅0️⃣, ✅1️⃣, ✅2️⃣… au jeu N+r), **et** que l'autre n'est toujours pas sorti au jeu
+**N+r+1**, le **même message** est édité : on y ajoute seulement le numéro de la relance, **(N+r+1) + 2 = N+r+3** (N+3 si le 1ᵉʳ est sorti direct) ; le costume pas venu reste ⏳ :
+
+    ♦️N°: 1138⏳
+     ┣━♣️ N°1135✅
+     ┣━♦️ N°1138⏳
+    ♣️✅0️⃣N°: 1135
+
+- Exemple : ♥️✅1️⃣ (jeu 473), ♣️ pas sorti au jeu 474 → ♣️ relancé à **N°476** (474 + 2) ; s'il sort à 476 : N°476✅.
+- **Pas de relance** : les deux costumes sortent avant ; aucun ne sort (perdu) ; le jeu visé N+r+3 est déjà joué. Rattrapages épuisés avant N+r+1 : la relance part tout de suite.
+- L'autre sort à N+2 (après l'annonce de la relance) : la relance reste affichée et jouée ; la ligne du costume suit la relance (`♦️N°: 1138⏳`) jusqu'à son résultat.
+- **Une seule relance à la fois par costume** et par configuration : tant qu'une relance de ce costume est en cours, un autre message d'origine ne lance pas une deuxième relance. Le numéro de la relance porte ⏳ tant qu'elle n'est pas jouée, puis ✅ (gagnée) ou ❌ (perdue) ; il sort au jeu relancé : ♦️✅0️⃣ ; jamais : ♦️❌.
+- Avec 3 costumes, la relance en contient 2, même règle pour la suite (3 relances au maximum). Voir ci-dessus pour les rattrapages épuisés.
+- La relance compte comme une prédiction à part dans les gagnés / perdus de la configuration.
+- Avec 1 seul costume, pas de relance. Une configuration n'envoie jamais deux messages pour le même numéro de jeu.
+- Code : `best-weak-top.js` (mode `relance`, `sendRelaunch`, constante `RELAUNCH_OFFSET = 3`) ; mêmes routes `/api/best-weak/configs` avec `{ "mode": "relance", "ranks": [1, 2] }`.
+  Exportée / importée avec le reste du panneau « Meilleur + plus faible ».
+
+## 🔁 Relance après perte (bouton de l'accueil, page `/#/loss-relaunch`, v63)
+
+- **Créer** : on coche un ou plusieurs canaux à suivre (ID, ou @nom). Le bot lit les prédictions publiées (N° de jeu + costume) et les vérifie lui-même sur la main du joueur, avec les rattrapages du canal suivi.
+- **Perte** : costume jamais sorti de N à N+R → dès que la main du joueur du dernier rattrapage est complète, le bot prédit le **même costume** au jeu **N + R + D**, sans attendre la fin de la main du banquier. D=1 (par défaut) signifie le jeu qui suit : 12 ❤️ avec 3 rattrapages, absent au 15 → prédiction **N°16 ❤️**.
+- **Réglages** : canaux à suivre (ou configuration « Relance »), ID du canal d'envoi, format de prédiction (1 → 101), nombre de rattrapages de la nouvelle prédiction, rattrapages par canal suivi (vide = même nombre), D (décalage après le dernier rattrapage) et mot-clé facultatif.
+- **Suite** : la relance est vérifiée (N°, puis ses rattrapages) et son message est édité en ✅ / ❌ ; la fiche affiche envoyées, gagnées, perdues, taux et les dernières relances.
+- **Canal « Relance »** : si le canal coché est celui où une configuration du bouton « Relance » envoie ses deux costumes + sa relance (ou si on coche la configuration Relance elle-même), on suit **la relance** (jeu relancé, rattrapages de la relance) et **non la perte** du message d'origine.
+- **Sécurités** : une configuration n'envoie jamais deux prédictions pour le même numéro de jeu ; pas d'envoi pour un jeu déjà joué ; le canal suivi et le canal d'envoi doivent être différents.
+- Code : `loss-relaunch.js` ; routes `/api/loss-relaunch/…` dans `server.js` ; la relance du bouton « Relance » est transmise par `best-weak-top.js` (`onRelaunchSent`) ; les messages du bot passent par `installChannelGuard` (`bot.js`).
+
+## 🛡️ Stabilité du jeu (page `/#/stability`, désactivée par défaut)
+
+Fonction **globale**, à activer sur la page « Stabilité » (aucun envoi ni blocage tant qu'elle est désactivée). Code : `game-stability.js`.
+- **Règle** : le jeu est *stable* quand, sur **4 jeux analysés** (fenêtre glissante, les mêmes jeux que l'Analyseur IA, main du joueur), les 4 costumes
+  ♣️ ♦️ ♠️ ❤️ sont sortis au moins une fois chez le joueur ; sinon il est *instable*. Moins de 4 jeux (début de sabot) : pas de jugement.
+- **Chat privé uniquement** (ADMIN_ID, jamais un canal) : « ⚠️ Jeu instable » dès que l'instabilité commence, « ✅ Jeu de nouveau stable » avec la
+  durée de l'instabilité, et un **bilan de stabilité toutes les heures** (à l'heure pile, fuseau `RESET_TZ`) : de tel jeu à tel jeu stable, de tel jeu à tel jeu instable.
+- **Évaluation toutes les 30 min** (v34) : à chaque xxh00 / xxh30, sur les **10 derniers jeux**, chaque jeu est jugé avec la règle des 4 jeux ; le
+  **taux de jeux stables** est comparé au **seuil** (80 % par défaut, réglable sur la page). Message dans le chat privé : « ✅ Jeu stable / ⚠️ Jeu instable ·
+  9/10 jeux stables = 90 % (seuil 80 %) ». Il faut 13 jeux (10 jugés + 3 de contexte). N'influence pas le blocage. API : `POST /api/stability/threshold`.
+- **Blocage** : si le jeu reste instable **10 min**, l'envoi des nouveaux messages est suspendu **1 h** dans les canaux cochés sur la page (toutes les
+  configurations de tous les boutons). Les messages déjà publiés continuent d'être vérifiés / édités. Après l'heure, l'envoi reprend ; si le jeu est encore
+  instable, un nouveau blocage n'intervient qu'après 10 nouvelles minutes. Bouton « Lever le blocage » sur la page.
+- Le blocage passe par le garde central des envois de `bot.js` (comme l'arrêt par canal) : le chat privé n'est jamais bloqué.
+- API : `GET /api/stability`, `POST /api/stability/enabled`, `POST /api/stability/channels`, `POST /api/stability/release`. Réglages exportés / importés (panneau `gameStability`).
+
+### Suivi des canaux (👁️)
+
+Carte « Suivre des canaux » à l'accueil (et page Stratégies) : confirmation → liste de tous les canaux (ID + nom) qui
+reçoivent des prédictions, à cocher → nom, ID du canal où envoyer, rattrapages, format de prédiction. Le bot suit les
+messages à plusieurs costumes qu'il publie lui-même dans les canaux cochés (`♦️ 95% … N°884`) :
+- **rotation** : 1ᵉʳ costume au 1ᵉʳ message, 2ᵉ au suivant, 3ᵉ au suivant s'il y en a 3 ; avec 2 costumes, retour au 1ᵉʳ ;
+- **motif** : le 1ᵉʳ costume gagne (jeu N) puis le 2ᵉ gagne au rattrapage (jeu N+1) → le 2ᵉ costume est prédit au jeu N+2.
+
+## Version du ZIP et page « Envois » (v28)
+
+- **Numéro de version** : fichier `version.js` (ex. `v28 · relance-arbre-envois · 2026-10-14`). Il s'affiche en bas de l'accueil, dans « Aide », sur
+  « Envois », et `GET /api/version` le renvoie. Si le site affiche « Version inconnue », l'ancien fichier est encore déployé. À modifier à chaque nouveau ZIP.
+- **Envois → « Tous les canaux effectivement utilisés »** : liste complète, un canal une seule fois avec tous les boutons qui lui envoient
+  (stratégies, panneaux, Meilleur + plus faible, Relance, Test, Dizaine, Costume faible, Type de mise, Copie et annonce, Jeu 21, Formation…).
+- **🗑 Supprimer** : `DELETE /api/diagnostics/channels/:id` retire le canal de TOUS ces réglages (listes `channels`, `publishedChannels`,
+  `shadowChannels`, `destChannels`, `exactChannels`, `valueChannels`, `categoryChannels`, canaux actifs) et enregistre. Les configurations restent mais n'envoient
+  plus rien tant qu'un autre canal n'est pas renseigné. Les canaux « sources » surveillés (Suivi des canaux, Détection auto) ne sont pas touchés.
