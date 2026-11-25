@@ -68,7 +68,6 @@ const isTrefle = (e) => !!e && e.kind === 'trefle';
 const statsFor = (e) => (isTrefle(e) ? statsOfT() : statsOf());
 const setErr = (kind, msg) => { if (kind === 'trefle') panel.lastErrorT = msg; else panel.lastError = msg; };
 const maxFinishedGameNumber = () => { let m = 0; for (const g of state.games.values()) if (g.finished && g.number > m) m = g.number; return m; };
-const maxKnownGameNumber = () => { let m = 0; for (const g of state.games.values()) if ((g.finished || g.dealing) && g.number > m) m = g.number; return m; };
 
 // ── envoi / édition ─────────────────────────────────────────────────────────
 function renderFor(entry, statusFr) {
@@ -144,7 +143,7 @@ function queueInverse(pred) {
   if (!channels.length) { panel.lastError = 'Le canal de l’image inverse est le même que celui du calcul : choisis un autre canal.'; return false; }
   const key = `${pred.target}:${suit}`;
   if (panel.seen.includes(key) || inflight.has(key)) { panel.duplicatesBlocked += 1; return false; }
-  if (pred.target <= maxKnownGameNumber()) { panel.lastError = `Image N°${pred.target} non envoyée : jeu déjà joué.`; return false; }
+  if (pred.target <= maxFinishedGameNumber()) { panel.lastError = `Image N°${pred.target} non envoyée : jeu déjà joué.`; return false; }
   panel.seen.push(key); if (panel.seen.length > SEEN_MAX) panel.seen = panel.seen.slice(-SEEN_MAX);
   inflight.add(key);
   sendEntry({ kind: 'inverse', suit, target: pred.target, maxR: pred.maxR, format: pred.format, origin: { target: pred.target, suit: pred.suit, trigger: pred.trigger } }, channels, key)
@@ -165,7 +164,7 @@ function queueTrefle({ target, trigger, src, maxR, format }) {
   // canal 1 = canal 2 : si le moteur a déjà une prédiction ♣️ en cours pour ce jeu, pas de doublon
   if (src === 'fixed' && channels.some((c) => main.includes(lower(c)))
     && (state.predictions || []).some((p) => p.strategy === KEY && p.status === 'en attente' && p.target === target && baseOf(p.suit) === '♣')) { panel.duplicatesBlockedT += 1; return false; }
-  if (target <= maxKnownGameNumber()) { panel.lastErrorT = `Prédiction ♣️ N°${target} non envoyée : jeu déjà joué.`; return false; }
+  if (target <= maxFinishedGameNumber()) { panel.lastErrorT = `Prédiction ♣️ N°${target} non envoyée : jeu déjà joué.`; return false; }
   panel.seen.push(key); if (panel.seen.length > SEEN_MAX) panel.seen = panel.seen.slice(-SEEN_MAX);
   inflight.add(key);
   sendEntry({ kind: 'trefle', src, suit: CLUB, target, maxR: maxR != null ? maxR : undefined, format, origin: { target, suit: CLUB, trigger } }, channels, key)
