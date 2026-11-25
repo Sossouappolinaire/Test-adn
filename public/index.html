@@ -4755,6 +4755,7 @@ Faites-en bon usage !
             <div class="field"><label>Format (1 → ${esc(fc)})</label><input id="peFormat" type="number" min="1" max="${esc(fc)}" value="${pe.format ?? 1}"></div>
             <div class="field"><label>Costumes comptés minimum dans la ligne</label><input id="peMinN" type="number" min="1" max="5000" value="${pe.minN ?? 1}"></div>
             <div class="field"><label>Costume déjà venu … fois de suite → prédire son inverse (0 = désactivé, 2 ou 3)</label><input id="peConsec" type="number" min="0" max="9" value="${pe.consec ?? 0}"></div>
+            <div class="field"><label>Écart minimum entre deux numéros prédits (2 = jamais deux numéros collés ; 1 = aucune contrainte)</label><input id="peGap" type="number" min="1" max="20" value="${pe.minGap ?? 2}"></div>
             <div class="field"><label>&nbsp;</label><label class="check"><input id="peEnabled" type="checkbox" ${pe.enabled ? 'checked' : ''}> Activer l'envoi</label></div>
           </div>
           <div class="toolbar"><button class="button small primary" onclick="saveParityEgalite()">Enregistrer</button><button class="button small ghost" onclick="testParityEgalite()">Envoyer un test</button><button class="button small danger" onclick="resetParityEgalite()">Remettre à zéro</button><button class="button small ghost" onclick="refresh().then(parityEgalitePage)">Actualiser</button></div>
@@ -4771,7 +4772,7 @@ Faites-en bon usage !
     }
     async function saveParityEgalite() {
       try {
-        await api('/api/parity-egalite/config', 'POST', { enabled: $('#peEnabled')?.checked, channels: val('peChannel'), maxR: val('peMaxR'), format: val('peFormat'), minN: val('peMinN'), sendAt: val('peSendAt'), offset: val('peOffset'), consec: val('peConsec') });
+        await api('/api/parity-egalite/config', 'POST', { enabled: $('#peEnabled')?.checked, channels: val('peChannel'), maxR: val('peMaxR'), format: val('peFormat'), minN: val('peMinN'), sendAt: val('peSendAt'), offset: val('peOffset'), consec: val('peConsec'), minGap: val('peGap') });
         await refresh(); parityEgalitePage(); toast('« Palier parité égalité » enregistré.');
       } catch (e) { toast(e.message, 'error'); }
     }
