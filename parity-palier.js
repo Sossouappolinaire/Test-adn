@@ -338,7 +338,7 @@ async function tick() {
 }
 
 // ── réglages ────────────────────────────────────────────────────────────────
-function config_() { return { enabled: panel.enabled, channels: [...panel.channels], invChannels: [...panel.invChannels], format: panel.format, maxR: panel.maxR, lead: panel.lead, minN: panel.minN, mode: panel.mode, sendAt: panel.sendAt, consec: panel.consec, minGap: panel.minGap }; }
+function config_() { return { enabled: panel.enabled, channels: [...panel.channels], invChannels: [...panel.invChannels], format: panel.format, maxR: panel.maxR, lead: panel.lead, minN: panel.minN, mode: panel.mode, sendAt: panel.sendAt, consec: panel.consec, minGap: panel.minGap , gapV156: true }; }
 function configure(patch = {}) {
   if (patch.enabled !== undefined) panel.enabled = !!patch.enabled;
   if (patch.channels !== undefined) panel.channels = loss.parseChannels(patch.channels);
@@ -410,7 +410,7 @@ function applySaved(saved) {
   panel.enabled = c.enabled === true; panel.channels = loss.parseChannels(c.channels); panel.invChannels = loss.parseChannels(c.invChannels);
   panel.format = fmt.clampFormat(c.format || config.DEFAULT_FORMAT); panel.maxR = clampInt(c.maxR, 0, 9, DEFAULT_MAXR);
   panel.lead = clampInt(c.lead, 1, 20, DEFAULT_LEAD); panel.minN = clampInt(c.minN, 1, 5000, DEFAULT_MINN);
-  panel.mode = MODES.includes(c.mode) ? c.mode : 'sequence'; panel.sendAt = clampInt(c.sendAt, 1, 10, DEFAULT_SENDAT); panel.consec = consecutive.clampNeed(c.consec, DEFAULT_CONSEC); panel.minGap = clampInt(c.minGap, 1, 20, DEFAULT_MINGAP);
+  panel.mode = MODES.includes(c.mode) ? c.mode : 'sequence'; panel.sendAt = clampInt(c.sendAt, 1, 10, DEFAULT_SENDAT); panel.consec = consecutive.clampNeed(c.consec, DEFAULT_CONSEC); panel.minGap = clampInt(c.minGap, 1, 20, DEFAULT_MINGAP); if (c.gapV156 !== true && panel.minGap < 2) panel.minGap = 2; // v156 : une seule fois, un ancien réglage « 1 » (aucune contrainte) repasse à 2 (le défaut voulu)
   panel.frozen = saved.frozen && Array.isArray(saved.frozen.rows) && saved.frozen.rows.length === 10 ? saved.frozen : null;
   panel.cursor = Number(saved.cursor) || 0; panel.lastTarget = Number.isFinite(Number(saved.lastTarget)) && saved.lastTarget !== null ? Number(saved.lastTarget) : null;
   panel.pendingMessages = Array.isArray(saved.pendingMessages) ? saved.pendingMessages.filter((s) => s && s.id).slice(-(SENT_RESOLVED_MAX + 50)) : [];

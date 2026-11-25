@@ -1,10 +1,11 @@
 // Numéro de version de CE ZIP : affiché sur le site (Accueil, Aide, Envois) et dans /api/version.
 // À changer à chaque nouvelle archive pour vérifier d'un coup d'œil que le bon fichier est déployé.
 module.exports = {
-  version: 'v155',
-  name: 'trio-canal1-correctif',
+  version: 'v156',
+  name: 'egalite-ecart-minimum',
   date: '2026-11-24',
   features: [
+    'v156 — « Palier parité égalité » : nouveau réglage « Écart minimum entre deux numéros prédits » (2 par défaut, 1 = aucune contrainte) : cette stratégie n’avait aucun écart et envoyait des numéros collés (#510 puis #511) ; après le №510, le №511 n’est plus envoyé, le №512 l’est. Les numéros sont traités dans l’ordre croissant. « Palier parité » : un ancien réglage d’écart « 1 » (aucune contrainte) repasse une seule fois à 2 au redémarrage (parity-egalite.js, parity-palier.js, public/index.html, version.js)',
     'v155 — « Trèfle ×3 » trio : le canal 1 (♣️) et le canal 3 (image inverse) ne partaient pas quand le jeu suivant était déjà en distribution : le contrôle « jeu déjà joué » comptait le jeu en cours de distribution, alors que le moteur (canal 2) ne compte que les jeux terminés. Même règle que le moteur maintenant (trefle-miroir.js)',
     'v154 — Allègement : dossier public/ réduit à index.html + intro.js (login.html, succes.html, pay-sebpay.html et splash.jpg supprimés : aucune route ni page ne les utilise, le site est ouvert sans connexion) ; doublons inutilisés supprimés à la racine (index.html, login.html, intro.js, succes.html, pay-sebpay.html : seul le dossier public/ est servi). pdfkit, xlsx et archiver étaient déjà chargés à la demande',
     'v153 — « Trèfle ×3 » : TRIO DE CANAUX qui peuvent prédire en même temps. Canal 1 = ♣️ UNIQUEMENT, quelle que soit la configuration, avec les déclencheurs ajoutés (♣️ chez le joueur sur N-2, N-1 et N) et, par défaut, aussi le ♣️ du calcul (option) ; les 3 canaux suivent le même créneau de jeux ; canal 2 = le calcul IB × 0,21 (toutes ses prédictions, il n’envoie plus dans le canal 1) ; canal 3 = l’inverse du canal 2 (❤️ ↔ ♣️, ♦️ ↔ ♠️). Exemple : le calcul prédit ♣️ → canal 1 ♣️, canal 2 ♣️, canal 3 ❤️. Chaque canal est vérifié et édité (✅ / ❌) à part, statistiques du canal 1 dans la page de la stratégie, bouton de test par canal (trefle-miroir.js, predictor.js, server.js, public/index.html, version.js)',

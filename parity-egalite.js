@@ -39,12 +39,14 @@ const DB_KEY = 'parity_egalite_state';
 const STORE_KEY = 'parityEgalite';
 const CFG_ID = 'parity-egalite';
 const NAME = 'Palier parité égalité';
-const DEFAULT_MAXR = 3, DEFAULT_MINN = 1, DEFAULT_SENDAT = 2, DEFAULT_OFFSET = 0, DEFAULT_CONSEC = 0, QUEUE_MAX = 60;
+const DEFAULT_MAXR = 3, DEFAULT_MINN = 1, DEFAULT_SENDAT = 2, DEFAULT_OFFSET = 0, DEFAULT_CONSEC = 0, DEFAULT_MINGAP = 2, QUEUE_MAX = 60;
 const OFFSETS = [0, 3];
 const SENT_RESOLVED_MAX = 100;
 
 const panel = {
   enabled: false, channels: [], format: config.DEFAULT_FORMAT, maxR: DEFAULT_MAXR, minN: DEFAULT_MINN, sendAt: DEFAULT_SENDAT, offset: DEFAULT_OFFSET, consec: DEFAULT_CONSEC,
+  minGap: DEFAULT_MINGAP, // v156 : écart minimum entre deux numéros prédits (2 = jamais deux numéros collés ; 1 = aucune contrainte)
+  lastTarget: null,       // v156 : numéro visé par la dernière prédiction envoyée
   frozen: null,        // palier figé { source: 510, rows: [{ digit, total, cells }] }
   queue: [],           // lignes retenues au gel du palier : { source, digit, suit, pct, done }
   pendingMessages: [], // prédictions envoyées (en attente puis résolues)
@@ -152,6 +154,7 @@ async function launch(target, digit, suit, lowPct, meta) {
     entry.messages = await sendToChannels(renderFor(entry, null));
     if (!entry.messages.length) return false;
     panel.pendingMessages.push(entry);
+    panel.lastTarget = target; // v156 : référence de l'écart minimum
     const st = statsOf(); st.sent += 1; if (entry.swapped) st.swapped = (st.swapped || 0) + 1; panel.sentCount += 1; panel.lastSentAt = Date.now(); panel.lastError = null;
     return true;
   } finally { inflight.delete(key); }
@@ -167,6 +170,7 @@ function resetForNewShoe() {
   for (const s of panel.pendingMessages) if (s.status === 'en attente') { s.status = 'annulé'; s.resolvedAt = Date.now(); changed = true; }
   if (panel.queue.length) { panel.queue = []; changed = true; }
   if (panel.frozen) { panel.frozen = null; changed = true; }
+  if (panel.lastTarget != null) { panel.lastTarget = null; changed = true; }
   inflight.clear();
   if (changed) persist();
   return changed;
@@ -233,11 +237,13 @@ async function tick() {
     if (panel.enabled && panel.channels.length) {
       const known = maxKnownGameNumber();
       if (known) {
-        for (const q of panel.queue) {
+        for (const q of [...panel.queue].sort((a, b) => targetOf(a) - targetOf(b))) { // v156 : par numéro croissant (l'écart minimum dépend de l'ordre)
           if (q.done) continue;
           const target = targetOf(q);
           if (known > target) { q.done = true; changed = true; continue; } // jeu déjà commencé : plus à prédire
           if (known < target - panel.sendAt) continue;                       // trop tôt
+          // v156 : écart minimum avec la dernière prédiction envoyée (2 : après le №510, le №511 n'est PAS envoyé, le №512 l'est)
+          if (panel.minGap > 1 && panel.lastTarget != null && Math.abs(target - panel.lastTarget) < panel.minGap) { q.done = true; panel.gapSkipped = (panel.gapSkipped || 0) + 1; changed = true; continue; }
           // v132 : réglage « costume venu N fois de suite → inverse » ; les jeux précédents pas tous connus → on attend (réessai au passage suivant)
           const dec = consecutive.decide(target, q.suit, panel.consec);
           if (dec.wait) continue;
@@ -258,7 +264,7 @@ async function tick() {
 }
 
 // ── réglages ────────────────────────────────────────────────────────────────
-function config_() { return { enabled: panel.enabled, channels: [...panel.channels], format: panel.format, maxR: panel.maxR, minN: panel.minN, sendAt: panel.sendAt, offset: panel.offset, consec: panel.consec }; }
+function config_() { return { enabled: panel.enabled, channels: [...panel.channels], format: panel.format, maxR: panel.maxR, minN: panel.minN, sendAt: panel.sendAt, offset: panel.offset, consec: panel.consec, minGap: panel.minGap }; }
 function configure(patch = {}) {
   if (patch.enabled !== undefined) panel.enabled = !!patch.enabled;
   if (patch.channels !== undefined) panel.channels = loss.parseChannels(patch.channels);
@@ -268,6 +274,7 @@ function configure(patch = {}) {
   if (patch.sendAt !== undefined) panel.sendAt = clampInt(patch.sendAt, 1, 10, DEFAULT_SENDAT);
   if (patch.offset !== undefined) panel.offset = clampOffset(patch.offset);
   if (patch.consec !== undefined) panel.consec = consecutive.clampNeed(patch.consec, DEFAULT_CONSEC);
+  if (patch.minGap !== undefined) panel.minGap = clampInt(patch.minGap, 1, 20, DEFAULT_MINGAP); // v156
   persist();
   return config_();
 }
@@ -279,7 +286,7 @@ function unblockAll() {
   return n;
 }
 function unblock() { const n = unblockAll(); persist(); return n; }
-function resetStats() { panel.stats = emptyStats(); unblockAll(); panel.frozen = null; panel.queue = []; persist(); }
+function resetStats() { panel.stats = emptyStats(); unblockAll(); panel.frozen = null; panel.queue = []; panel.lastTarget = null; persist(); }
 function setChannelTitle(id, title) { const k = String(id == null ? '' : id).trim(); if (!k || !title) return; panel.channelTitles[k] = String(title).slice(0, 120); persist(); }
 
 async function test() {
@@ -304,7 +311,7 @@ function status() {
   const upcoming = panel.queue.filter((q) => !q.done).slice(0, 10).map((q) => ({ target: targetOf(q), digit: q.digit, suit: q.suit, pct: q.pct })).sort((a, b) => a.target - b.target);
   return {
     ...config_(), rows, frozenSource: fz ? fz.source : null, upcoming,
-    sentCount: panel.sentCount, lastSentAt: panel.lastSentAt, duplicatesBlocked: panel.duplicatesBlocked, won: st.won, lost: st.lost, swapped: st.swapped || 0, resolved, rate: pct(st.won, resolved),
+    sentCount: panel.sentCount, lastSentAt: panel.lastSentAt, duplicatesBlocked: panel.duplicatesBlocked, gapSkipped: panel.gapSkipped || 0, lastTarget: panel.lastTarget, won: st.won, lost: st.lost, swapped: st.swapped || 0, resolved, rate: pct(st.won, resolved),
     steps: Object.entries(st.byStep || {}).map(([k, n]) => ({ step: Number(k), n: Number(n) })).sort((a, b) => a.step - b.step),
     waiting: waiting.length,
     recent: panel.pendingMessages.slice(-12).reverse().map((s) => ({ target: s.target, digit: s.digit, suit: s.suit, from: s.from || null, pct: s.pct, status: s.status, step: s.step, maxR: s.maxR })),
@@ -314,7 +321,7 @@ function status() {
 
 // ── persistance ─────────────────────────────────────────────────────────────
 function persist() {
-  const saved = { config: config_(), frozen: panel.frozen, queue: panel.queue, pendingMessages: panel.pendingMessages, stats: panel.stats, sentCount: panel.sentCount, lastSentAt: panel.lastSentAt, channelTitles: panel.channelTitles };
+  const saved = { config: config_(), frozen: panel.frozen, queue: panel.queue, pendingMessages: panel.pendingMessages, stats: panel.stats, sentCount: panel.sentCount, lastSentAt: panel.lastSentAt, channelTitles: panel.channelTitles, lastTarget: panel.lastTarget };
   try { store.patch({ [STORE_KEY]: saved }); } catch (_) {}
   if (db.ready) db.setSetting(DB_KEY, JSON.stringify(saved)).catch((e) => { panel.lastError = e.message; });
 }
@@ -323,7 +330,8 @@ function applySaved(saved) {
   const c = saved.config || {};
   panel.enabled = c.enabled === true; panel.channels = loss.parseChannels(c.channels);
   panel.format = fmt.clampFormat(c.format || config.DEFAULT_FORMAT); panel.maxR = clampInt(c.maxR, 0, 9, DEFAULT_MAXR);
-  panel.minN = clampInt(c.minN, 1, 5000, DEFAULT_MINN); panel.sendAt = clampInt(c.sendAt, 1, 10, DEFAULT_SENDAT); panel.offset = clampOffset(c.offset); panel.consec = consecutive.clampNeed(c.consec, DEFAULT_CONSEC);
+  panel.minN = clampInt(c.minN, 1, 5000, DEFAULT_MINN); panel.sendAt = clampInt(c.sendAt, 1, 10, DEFAULT_SENDAT); panel.offset = clampOffset(c.offset); panel.consec = consecutive.clampNeed(c.consec, DEFAULT_CONSEC); panel.minGap = clampInt(c.minGap, 1, 20, DEFAULT_MINGAP);
+  panel.lastTarget = Number.isFinite(Number(saved.lastTarget)) && saved.lastTarget !== null ? Number(saved.lastTarget) : null;
   panel.frozen = saved.frozen && Array.isArray(saved.frozen.rows) && saved.frozen.rows.length === 10 ? saved.frozen : null;
   panel.queue = Array.isArray(saved.queue) ? saved.queue.filter((q) => q && Number.isInteger(q.source) && Number.isInteger(q.digit) && q.suit).slice(-QUEUE_MAX) : [];
   panel.pendingMessages = Array.isArray(saved.pendingMessages) ? saved.pendingMessages.filter((s) => s && s.id).slice(-(SENT_RESOLVED_MAX + 50)) : [];
