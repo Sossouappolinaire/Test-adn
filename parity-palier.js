@@ -41,6 +41,10 @@
 //     toujours séparés d'au moins cet écart (2 = jamais deux numéros collés : 521 puis 522 est interdit, 521 puis 523 est permis). Avant, rien ne
 //     l'imposait : un ✅0️⃣ faisait viser N+1 (« Une à la fois ») et le mode « Liste » envoyait tous les numéros du palier, donc des prédictions
 //     collées. L'écart se compte entre les numéros VISÉS par les prédictions normales (l'inverse du canal de l'inverse n'entre pas en compte).
+//   • v157 — ÉCART MINIMUM = 3 PAR DÉFAUT et GARANTI : 521 puis 522 ou 523 sont interdits (pas d'envoi), 521 puis 524 est permis. Le DERNIER numéro
+//     prédit est GARDÉ (mémoire + base, enregistré à chaque envoi, conservé au redémarrage et au « reset des statistiques » ; il ne repart à zéro
+//     qu'avec le nouveau sabot de 00h00, où la numérotation recommence à #1) pour vérifier l'écart avant CHAQUE envoi. Contrôle posé aussi dans
+//     l'envoi lui-même : aucun chemin (Une à la fois, Liste, canal de l'inverse) ne peut envoyer une prédiction trop proche.
 //   • v144 — CANAL DE L'INVERSE (réglage facultatif) : quand le réglage ci-dessus remplace la prédiction par son inverse, et qu'un « canal de
 //     l'inverse » est renseigné, Palier parité prédit NORMALEMENT le costume du palier dans le canal principal (comme s'il n'y avait pas
 //     d'inverse) ET envoie l'INVERSE dans l'autre canal. L'inverse est vérifié et édité (✅ / ❌) à part : il n'entre ni dans l'enchaînement
@@ -57,11 +61,12 @@ const config = require('./config');
 const loss = require('./loss-return'); // liste d'ID de canaux (parseChannels)
 const parityCounter = require('./parity-counter');
 const consecutive = require('./suit-consecutive'); // v132 : costume venu N fois de suite → inverse
+const gapGuard = require('./gap-guard'); // v158 : « Confirmation de l'écart » commune par canal (écart 3 imposé)
 const { state, hasSuit, setOnShoeReset } = require('./predictor');
 
 const DB_KEY = 'parity_palier_state';
 const STORE_KEY = 'parityPalier';
-const DEFAULT_MAXR = 3, DEFAULT_LEAD = 1, DEFAULT_MINN = 1, DEFAULT_SENDAT = 2, DEFAULT_CONSEC = 0, DEFAULT_MINGAP = 2, DONE_MAX = 200;
+const DEFAULT_MAXR = 3, DEFAULT_LEAD = 1, DEFAULT_MINN = 1, DEFAULT_SENDAT = 2, DEFAULT_CONSEC = 0, DEFAULT_MINGAP = 3, DONE_MAX = 200;
 const MODES = ['sequence', 'list'];
 const SENT_RESOLVED_MAX = 100;
 
@@ -165,9 +170,17 @@ function gapTooClose(n) {
   const d = Math.abs(n - panel.lastTarget);
   return d > 0 && d < panel.minGap;
 }
+// v158 : « Confirmation de l'écart » — écart FORCÉ (3 minimum) avec la dernière prédiction de cette stratégie ET avec toute prédiction déjà
+// posée dans le même canal (autre stratégie du Compte parité, ou publication vue dans le canal)
+function gapBlockedFor(n) {
+  if (gapTooClose(n)) return true;
+  const rv = gapGuard.check(panel.channels, n, panel.minGap, 'palier');
+  if (!rv.ok) { gapGuard.noteBlocked('palier', n, rv); return true; }
+  return false;
+}
 // prochain numéro qu'une prédiction peut viser : jamais un jeu commencé, après le curseur, écart minimum avec la dernière prédiction
 function nextTargetNumber(known) {
-  const gapFloor = panel.lastTarget != null ? panel.lastTarget + panel.minGap : 0;
+  const gapFloor = Math.max(panel.lastTarget != null ? panel.lastTarget + panel.minGap : 0, gapGuard.floor(panel.channels, panel.minGap));
   return Math.max(Number(panel.cursor) || 0, known + panel.lead, gapFloor);
 }
 // comparaison avant toute prédiction : jeu en direct supérieur au numéro à prédire → ignorée ; main du joueur déjà arrivée → ignorée
@@ -187,9 +200,14 @@ async function launch(target, digit, suit, lowPct, meta, kind) {
   const channels = inverse ? panel.invChannels : panel.channels;
   if (!channels.length) return false;
   if (!canTarget(target)) return false; // jeu en direct > numéro à prédire : ignorée
+  if (!inverse && gapTooClose(target)) { panel.gapBlocked = (panel.gapBlocked || 0) + 1; return false; } // v157 : écart minimum non respecté → pas d'envoi
   const key = `${inverse ? 'inv:' : ''}${target}:${suit}`;
   if (isDuplicate(target, suit, kind) || inflight.has(key)) { panel.duplicatesBlocked += 1; return false; }
   inflight.add(key);
+  // v158 : confirmation de l'écart commune au canal : contrôle + réservation d'un seul geste, AVANT l'envoi ; refusé = pas d'envoi
+  const rv = gapGuard.reserve(channels, target, panel.minGap, 'palier');
+  if (!rv.ok) { inflight.delete(key); panel.gapBlocked = (panel.gapBlocked || 0) + 1; return false; }
+  let sentOk = false;
   try {
     const entry = { id: `pp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, cfgId: 'parity-palier', suit, target, digit, pct: lowPct, maxR: panel.maxR, format: panel.format, step: 0, status: 'en attente', messages: [], createdAt: Date.now(), resolvedAt: null };
     if (inverse) entry.kind = 'inverse';
@@ -198,15 +216,17 @@ async function launch(target, digit, suit, lowPct, meta, kind) {
     if (!entry.messages.length) return false;
     panel.pendingMessages.push(entry);
     const st = statsOf(); if (inverse) st.inv.sent += 1; else st.sent += 1; if (entry.swapped) st.swapped = (st.swapped || 0) + 1; panel.sentCount += 1; panel.lastSentAt = Date.now(); panel.lastError = null;
-    if (!inverse) panel.lastTarget = target; // v148 : référence de l'écart minimum
+    if (!inverse) { panel.lastTarget = target; persist(); } // v148/v157 : dernier numéro prédit gardé tout de suite (référence de l'écart minimum)
+    sentOk = true;
     return true;
-  } finally { inflight.delete(key); }
+  } finally { if (!sentOk) gapGuard.release(channels, target, 'palier'); inflight.delete(key); }
 }
 
 // v144 : envoie la décision pour un numéro. Si le réglage « costume déjà venu N fois de suite » a produit un inverse ET qu'un canal de
 // l'inverse est renseigné : prédiction NORMALE (costume du palier) dans le canal principal + INVERSE dans l'autre canal.
 // Renvoie { main, all } : main = la prédiction du canal principal est partie (ou existe déjà) ; all = tout ce qui devait partir est parti.
 async function sendPick(n, digit, pick, dec) {
+  if (gapBlockedFor(n)) return { main: false, all: false }; // v157/v158 : écart minimum non respecté → ni la prédiction normale ni son inverse ne partent
   const split = !!(dec && dec.swapped && panel.invChannels.length);
   const part = async (suit, meta, kind) => (await launch(n, digit, suit, pick.pct, meta, kind)) || isDuplicate(n, suit, kind);
   if (!split) { const ok = await part(dec.suit, dec); return { main: ok, all: ok }; }
@@ -249,6 +269,7 @@ async function tick() {
     let changed = false;
     // sécurité : état resté d'un sabot précédent (relance du serveur pendant le changement de jour, jeux relus après une coupure…)
     const knownNow = maxKnownGameNumber();
+    if (knownNow && gapGuard.prune(knownNow)) { /* v158 : numéros d'un ancien sabot retirés de la confirmation de l'écart */ }
     if (knownNow) {
       const staleFrozen = panel.frozen && panel.frozen.source > knownNow + 20;
       const stalePending = panel.pendingMessages.some((s) => s.status === 'en attente' && s.target > knownNow + STALE_AHEAD);
@@ -307,7 +328,7 @@ async function tick() {
             if (!canTarget(n)) continue;
             const pick = pickForDigit(n % 10); // égalité ou palier vide : pas de prédiction pour ce numéro
             // v148 : écart minimum — un numéro trop proche de la dernière prédiction envoyée n'est PAS prédit (il est marqué traité, sans envoi)
-            if (pick && gapTooClose(n)) { panel.done.push(n); if (panel.done.length > DONE_MAX) panel.done = panel.done.slice(-DONE_MAX); changed = true; continue; }
+            if (pick && gapBlockedFor(n)) { panel.done.push(n); if (panel.done.length > DONE_MAX) panel.done = panel.done.slice(-DONE_MAX); changed = true; continue; }
             // v124 : le numéro n'est marqué « traité » que si la prédiction est partie (ou n'existe pas) ; un envoi raté est retenté au passage suivant
             // v132 : réglage « costume venu N fois de suite → inverse » ; les jeux précédents pas tous connus → on attend (réessai au passage suivant)
             const dec = pick ? consecutive.decide(n, pick.suit, panel.consec) : null;
@@ -338,7 +359,7 @@ async function tick() {
 }
 
 // ── réglages ────────────────────────────────────────────────────────────────
-function config_() { return { enabled: panel.enabled, channels: [...panel.channels], invChannels: [...panel.invChannels], format: panel.format, maxR: panel.maxR, lead: panel.lead, minN: panel.minN, mode: panel.mode, sendAt: panel.sendAt, consec: panel.consec, minGap: panel.minGap , gapV156: true }; }
+function config_() { return { enabled: panel.enabled, channels: [...panel.channels], invChannels: [...panel.invChannels], format: panel.format, maxR: panel.maxR, lead: panel.lead, minN: panel.minN, mode: panel.mode, sendAt: panel.sendAt, consec: panel.consec, minGap: panel.minGap, gapV156: true, gapV157: true, gapV158: true }; }
 function configure(patch = {}) {
   if (patch.enabled !== undefined) panel.enabled = !!patch.enabled;
   if (patch.channels !== undefined) panel.channels = loss.parseChannels(patch.channels);
@@ -350,7 +371,7 @@ function configure(patch = {}) {
   if (patch.mode !== undefined) panel.mode = MODES.includes(patch.mode) ? patch.mode : 'sequence';
   if (patch.sendAt !== undefined) panel.sendAt = clampInt(patch.sendAt, 1, 10, DEFAULT_SENDAT);
   if (patch.consec !== undefined) panel.consec = consecutive.clampNeed(patch.consec, DEFAULT_CONSEC);
-  if (patch.minGap !== undefined) panel.minGap = clampInt(patch.minGap, 1, 20, DEFAULT_MINGAP); // v148
+  if (patch.minGap !== undefined) panel.minGap = clampInt(patch.minGap, gapGuard.FORCED_GAP, 20, DEFAULT_MINGAP); // v148/v158 : jamais moins de 3
   persist();
   return config_();
 }
@@ -362,7 +383,7 @@ function unblockAll() {
   return n;
 }
 function unblock() { const n = unblockAll(); persist(); return n; }
-function resetStats() { panel.stats = emptyStats(); unblockAll(); panel.frozen = null; panel.lastTarget = null; persist(); }
+function resetStats() { panel.stats = emptyStats(); unblockAll(); panel.frozen = null; persist(); } // v157 : le dernier numéro prédit (lastTarget) est GARDÉ : l'écart minimum reste vérifié
 function setChannelTitle(id, title) { const k = String(id == null ? '' : id).trim(); if (!k || !title) return; panel.channelTitles[k] = String(title).slice(0, 120); persist(); }
 
 async function test() {
@@ -388,7 +409,7 @@ function status() {
   const waiting = panel.pendingMessages.filter((s) => s.status === 'en attente');
   const nextTarget = known ? nextTargetNumber(known) : null;
   return {
-    ...config_(), rows, frozenSource: fz ? (fz.origin != null ? fz.origin : fz.source) : null, cursor: panel.cursor || 0, lastTarget: panel.lastTarget, nextTarget,
+    ...config_(), rows, frozenSource: fz ? (fz.origin != null ? fz.origin : fz.source) : null, cursor: panel.cursor || 0, lastTarget: panel.lastTarget, gapBlocked: panel.gapBlocked || 0, gapGuard: gapGuard.status(panel.channels), nextTarget,
     sentCount: panel.sentCount, lastSentAt: panel.lastSentAt, duplicatesBlocked: panel.duplicatesBlocked, won: st.won, lost: st.lost, swapped: st.swapped || 0, resolved, rate: pct(st.won, resolved),
     inv: { sent: st.inv.sent, won: st.inv.won, lost: st.inv.lost, rate: pct(st.inv.won, st.inv.won + st.inv.lost) }, invChannelNames: panel.invChannels.map((id) => panel.channelTitles[String(id)] || String(id)),
     steps: Object.entries(st.byStep || {}).map(([k, n]) => ({ step: Number(k), n: Number(n) })).sort((a, b) => a.step - b.step),
@@ -410,7 +431,8 @@ function applySaved(saved) {
   panel.enabled = c.enabled === true; panel.channels = loss.parseChannels(c.channels); panel.invChannels = loss.parseChannels(c.invChannels);
   panel.format = fmt.clampFormat(c.format || config.DEFAULT_FORMAT); panel.maxR = clampInt(c.maxR, 0, 9, DEFAULT_MAXR);
   panel.lead = clampInt(c.lead, 1, 20, DEFAULT_LEAD); panel.minN = clampInt(c.minN, 1, 5000, DEFAULT_MINN);
-  panel.mode = MODES.includes(c.mode) ? c.mode : 'sequence'; panel.sendAt = clampInt(c.sendAt, 1, 10, DEFAULT_SENDAT); panel.consec = consecutive.clampNeed(c.consec, DEFAULT_CONSEC); panel.minGap = clampInt(c.minGap, 1, 20, DEFAULT_MINGAP); if (c.gapV156 !== true && panel.minGap < 2) panel.minGap = 2; // v156 : une seule fois, un ancien réglage « 1 » (aucune contrainte) repasse à 2 (le défaut voulu)
+  panel.mode = MODES.includes(c.mode) ? c.mode : 'sequence'; panel.sendAt = clampInt(c.sendAt, 1, 10, DEFAULT_SENDAT); panel.consec = consecutive.clampNeed(c.consec, DEFAULT_CONSEC); panel.minGap = clampInt(c.minGap, 1, 20, DEFAULT_MINGAP); if (c.gapV156 !== true && panel.minGap < 2) panel.minGap = 2; // v156 : une seule fois, un ancien réglage « 1 » (aucune contrainte) repasse à 2
+  if (panel.minGap < gapGuard.FORCED_GAP) panel.minGap = gapGuard.FORCED_GAP; // v158 : écart FORCÉ à 3 minimum (plus de réglage 1 ou 2)
   panel.frozen = saved.frozen && Array.isArray(saved.frozen.rows) && saved.frozen.rows.length === 10 ? saved.frozen : null;
   panel.cursor = Number(saved.cursor) || 0; panel.lastTarget = Number.isFinite(Number(saved.lastTarget)) && saved.lastTarget !== null ? Number(saved.lastTarget) : null;
   panel.pendingMessages = Array.isArray(saved.pendingMessages) ? saved.pendingMessages.filter((s) => s && s.id).slice(-(SENT_RESOLVED_MAX + 50)) : [];

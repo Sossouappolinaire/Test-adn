@@ -34,6 +34,7 @@ const miracle = require('./miracle-prediction'); // « Miracle prediction » (v1
 const miracleSerie = require('./miracle-serie'); // « Miracle série » (v148)
 const parityEgalite = require('./parity-egalite'); // « Palier parité égalité » : 2e taux quand deux taux faibles sont égaux
 const distributionFaible = require('./distribution-faible'); // « Distribution faible » : distribution au taux le plus faible du Compte distribution (v125)
+const gapGuard = require('./gap-guard'); // « Confirmation de l'écart » (v158) : écart 3 imposé par canal
 const parityPalier = require('./parity-palier'); // « Palier parité » : costume au plus faible pourcentage du palier du Compte parité (v114)
 const endDigitTrio = require('./end-digit-trio'); // « Trio fin de numéro » : 3 meilleures fins de numéro par dizaine + suivi dans un autre canal (v127)
 const endDigitPredict = require('./end-digit-predict'); // « Prédiction fin de numéro » : meilleur / repli faible + inverse (v101)
@@ -420,6 +421,8 @@ function installChannelGuard(inst) {
       try { if (m && !m.skipped && typeof rest[0] === 'string') miracleSerie.onOwnPost(chatId, rest[0]); } catch (_) { /* suivi seulement */ }
       // « Canal Telegram » : un canal où ce bot publie peut aussi être une stratégie (voir canal-telegram.js)
       try { if (m && !m.skipped && typeof rest[0] === 'string') canalTelegram.onOwnPost(chatId, rest[0]); } catch (_) { /* suivi seulement */ }
+      // « Confirmation de l'écart » : toute prédiction réellement publiée dans un canal est mémorisée (voir gap-guard.js)
+      try { if (m && !m.skipped && typeof rest[0] === 'string') gapGuard.observe(chatId, rest[0]); } catch (_) { /* suivi seulement */ }
       return m;
     }, (err) => { sendDedupe.release(ddKeys); throw err; });
     };
@@ -2454,6 +2457,7 @@ async function applyDbConfigs() {
   await canalTelegram.restoreFromDb();
   await channelUniform.restoreFromDb();
   await endDigitPredict.restoreFromDb();
+  await gapGuard.restoreFromDb();
   await parityPalier.restoreFromDb();
   await endDigitTrio.restoreFromDb();
   await distributionFaible.restoreFromDb();
@@ -2557,6 +2561,7 @@ async function startLoop() {
   channelUniform.restore();
   endDigitPredict.restore();
   endDigitPredict.setSender(senderFor);
+  gapGuard.restore();
   parityPalier.restore();
   parityPalier.setSender(senderFor);
   endDigitTrio.restore();
