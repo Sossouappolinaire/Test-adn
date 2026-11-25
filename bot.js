@@ -184,6 +184,8 @@ const deny = (id) => bot && bot.sendMessage(id, "⛔ Commande réservée à l'ad
 
 function rememberChannel(chat) {
   if (!chat || !['channel', 'supergroup', 'group'].includes(chat.type)) return;
+  // v161 : un canal supprimé depuis « Envois » (liste ignoredChannels) ne revient plus tout seul dans la liste quand il publie un message
+  try { const ig = ((store.read() || {}).ignoredChannels || []).map((x) => String(x).trim()); if (ig.includes(String(chat.id).trim())) return; } catch (_) { /* liste absente : comportement habituel */ }
   if (!state.channels.some((c) => c.id === chat.id)) {
     state.channels.push({ id: chat.id, title: chat.title || String(chat.id) });
     persist();

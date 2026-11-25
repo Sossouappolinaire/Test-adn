@@ -22,27 +22,10 @@ const CANDIDATES = [
   `postgresql://${USER}:${PASS}@db.${REF}.supabase.co:5432/postgres`,
 ];
 
-// ── Base de SECOURS (projet Supabase « tv-kouame », la même que dans l'appli Appel Prédictions) ──
-// Même principe que la principale : un rôle PostgreSQL dédié (pas l'admin Supabase).
-// À RENSEIGNER avec le mot de passe de ce rôle (Supabase → Connect → Session pooler), soit :
-//   • ici, dans BACKUP_PASS (+ BACKUP_USER si le rôle n'est pas « bot_app »),
-//   • ou en collant l'adresse complète dans BACKUP_DATABASE_URL (variable Render ou constante ci-dessous).
-// Tant que rien n'est renseigné, la base de secours est simplement ignorée (le site marche comme avant).
-const BACKUP_REF  = 'kmvbsntmzjkpwwqgkqhz';  // v147 : base de SECOURS = ancien projet « site-production-baccara » (région eu-west-3)
-const BACKUP_USER = process.env.BACKUP_DB_USER || 'bot_app';
-const BACKUP_PASS = process.env.BACKUP_DB_PASS || 'ZHv41ll3G8Rir3v1YgzncBlzqk6Hyg2u3d3o6Rfb';          // ← mot de passe du rôle sur la base de secours
-const BACKUP_URL_OVERRIDE = String(process.env.BACKUP_DATABASE_URL || '').trim(); // ← ou adresse complète
-const BACKUP_REGION = process.env.BACKUP_DB_REGION || 'eu-west-3'; // région du projet de secours (voir Supabase → Settings)
-
-const BACKUP_CANDIDATES = BACKUP_URL_OVERRIDE
-  ? [BACKUP_URL_OVERRIDE]
-  : (BACKUP_PASS ? [
-      `postgresql://${BACKUP_USER}.${BACKUP_REF}:${BACKUP_PASS}@aws-1-${BACKUP_REGION}.pooler.supabase.com:5432/postgres`,
-      `postgresql://${BACKUP_USER}.${BACKUP_REF}:${BACKUP_PASS}@aws-0-${BACKUP_REGION}.pooler.supabase.com:5432/postgres`,
-      `postgresql://${BACKUP_USER}.${BACKUP_REF}:${BACKUP_PASS}@aws-1-${BACKUP_REGION}.pooler.supabase.com:6543/postgres`,
-      `postgresql://${BACKUP_USER}.${BACKUP_REF}:${BACKUP_PASS}@aws-0-${BACKUP_REGION}.pooler.supabase.com:6543/postgres`,
-      `postgresql://${BACKUP_USER}:${BACKUP_PASS}@db.${BACKUP_REF}.supabase.co:5432/postgres`,
-    ] : []);
+// ── Base de SECOURS : SUPPRIMÉE (v162) ─────────────────────────────────────────────────────────────
+// Le site n'utilise plus que la base PRINCIPALE. Le mot de passe et l'adresse de l'ancienne base de secours ont été retirés du code, et les
+// variables BACKUP_DB_* / BACKUP_DATABASE_URL de Render sont ignorées. (Pour la remettre un jour : redéfinir BACKUP_CANDIDATES.)
+const BACKUP_CANDIDATES = [];
 
 const mask = (u) => String(u).replace(/:\/\/([^:]+):[^@]+@/, '://$1:***@');
 

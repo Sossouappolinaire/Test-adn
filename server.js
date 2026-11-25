@@ -28,6 +28,8 @@ const { databaseUrl } = require('./database-url');
 const config = require('./config');
 const api = require('./api');
 const db = require('./db');
+const dbConnections = require('./db-connections'); // v160 : nombre de serveurs / connexions ouverts sur la base
+dbConnections.start();
 const auth = require('./auth');
 const fmt = require('./formats');
 const strategies = require('./strategies');
@@ -795,6 +797,11 @@ app.post('/api/template', (req, res) => {
 
 // La main analysée est toujours celle du joueur (banquier = archive seulement)
 app.post('/api/sethand', (req, res) => res.json({ ok: true, hand: 'joueur' }));
+
+// v160 : serveurs et connexions ouverts sur la base de données
+app.get('/api/db/connections', async (req, res) => {
+  try { res.json(await dbConnections.snapshot()); } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
 
 // --- vérification des données enregistrées ---------------------------------
 app.get('/api/db/overview', async (req, res) => {
