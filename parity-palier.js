@@ -321,7 +321,10 @@ async function tick() {
       if (panel.mode === 'list') {
         // mode « Liste » : chaque numéro de la dizaine suivant le palier figé part quand le jeu en direct est à `sendAt` jeux de ce numéro
         const fz = panel.frozen;
-        if (known && fz) {
+        // v159 : une prédiction non encore vérifiée (⏳ en attente) bloque la suivante, même en mode « Liste » ; une fois vérifiée, la suivante n'est
+        // envoyée que si son numéro est à 3 jeux (écart) ou plus de la DERNIÈRE prédiction (gapBlockedFor) : sinon elle n'est pas prédite
+        const mainPending = panel.pendingMessages.some((s) => s.status === 'en attente' && s.kind !== 'inverse');
+        if (known && fz && !mainPending) {
           for (let n = known; n <= known + panel.sendAt; n++) {
             if (Math.floor(n / 10) * 10 !== fz.source + 10) continue; // palier de cette dizaine pas encore figé : on attend
             if (panel.done.includes(n)) continue;
