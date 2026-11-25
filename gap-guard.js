@@ -10,6 +10,9 @@
 //   • observe()  : appelée par bot.js pour chaque message réellement publié dans un canal : si c'est une prédiction (même lecture que « Retour
 //                  après perte »), son numéro est mémorisé aussi, quelle que soit la stratégie qui l'a envoyée ;
 //   • l'écart est FORCÉ : jamais moins de 3, même si un ancien réglage valait 1 ou 2 ;
+//   • v158b — PLUSIEURS INSTANCES du site (Render, Back4app…) : chaque envoi réserve aussi 3 « cases » consécutives (n, n+1, n+2) du canal dans la base
+//     partagée (table sent_dedupe, kind « g »). Deux numéros à moins de 3 d'écart partagent forcément une case : la deuxième réservation est refusée,
+//     même si elle vient d'un autre processus. Base muette : la mémoire locale protège.
 //   • mémoire enregistrée (fichier + base) : elle survit aux redémarrages ; remise à zéro seulement avec le nouveau sabot de 00h00
 //     (la numérotation repart à #1).
 'use strict';
@@ -63,21 +66,57 @@ function noteBlocked(by, target, rv) {
   persist();
 }
 
-// contrôle + réservation en un seul geste (synchrone)
-function reserve(channels, target, gap, by) {
+// v158b : cases réservées dans la base partagée : un numéro n occupe les cases n … n+écart-1 (3 cases pour un écart de 3)
+const slotKeys = (chan, n, gap) => Array.from({ length: forcedGap(gap) }, (_, i) => `g|${chan}|${Number(n) + i}`);
+async function dbClaim(chan, n, gap) { // true = case(s) obtenue(s) ou base indisponible ; false = une case est déjà prise (autre processus)
+  if (!db.ready) return true;
+  const keys = slotKeys(chan, n, gap);
+  const values = keys.map((_, i) => `($${i + 1}, 'g', $${keys.length + 1})`).join(', ');
+  let r = null;
+  try {
+    r = await db.exec(`INSERT INTO sent_dedupe (key, kind, channel) VALUES ${values}
+      ON CONFLICT (key) DO UPDATE SET created_at = now() WHERE sent_dedupe.created_at < now() - interval '3 hours'
+      RETURNING key`, [...keys, chan]);
+  } catch (_) { return true; }
+  if (!r) return true; // base muette : la mémoire locale protège
+  if (r.rowCount === keys.length) return true;
+  const got = (r.rows || []).map((x) => x.key);
+  if (got.length) db.exec('DELETE FROM sent_dedupe WHERE key = ANY($1::text[])', [got]).catch(() => {}); // on rend les cases prises
+  return false;
+}
+function dbRelease(chan, n, gap) {
+  if (!db.ready) return;
+  db.exec('DELETE FROM sent_dedupe WHERE key = ANY($1::text[])', [slotKeys(chan, n, gap)]).catch(() => {});
+}
+
+// contrôle + réservation : le contrôle local et l'inscription en mémoire se font d'un seul geste (sans attente entre les deux), puis les cases de
+// la base partagée sont réservées (autre instance du site)
+async function reserve(channels, target, gap, by) {
   const rv = check(channels, target, gap, by);
   if (!rv.ok) { noteBlocked(by, target, rv); return rv; }
-  const t = Number(target);
+  const t = Number(target); const added = [];
   for (const ch of channels || []) {
     const l = list(ch);
-    if (!l.some((e) => e.n === t && e.by === by)) { l.push({ n: t, by, at: Date.now() }); if (l.length > PER_CHANNEL_MAX) l.splice(0, l.length - PER_CHANNEL_MAX); }
+    if (!l.some((e) => e.n === t && e.by === by)) { l.push({ n: t, by, at: Date.now() }); added.push(ch); if (l.length > PER_CHANNEL_MAX) l.splice(0, l.length - PER_CHANNEL_MAX); }
   }
   persist();
+  const claimed = [];
+  for (const ch of channels || []) {
+    if (!(await dbClaim(keyOf(ch), t, gap))) {
+      for (const c of claimed) dbRelease(keyOf(c), t, gap);
+      for (const c of added) { const l = state.channels[keyOf(c)]; const i = l ? l.findIndex((e) => e.n === t && e.by === by) : -1; if (i >= 0) l.splice(i, 1); }
+      persist();
+      const rv2 = { ok: false, conflict: { channel: String(ch), n: null, by: 'autre instance' } };
+      noteBlocked(by, target, rv2);
+      return rv2;
+    }
+    claimed.push(ch);
+  }
   return rv;
 }
-function release(channels, target, by) {
+function release(channels, target, by, gap) {
   const t = Number(target);
-  for (const ch of channels || []) { const l = state.channels[keyOf(ch)]; if (!l) continue; const i = l.findIndex((e) => e.n === t && e.by === by); if (i >= 0) l.splice(i, 1); }
+  for (const ch of channels || []) { const l = state.channels[keyOf(ch)]; if (!l) continue; const i = l.findIndex((e) => e.n === t && e.by === by); if (i >= 0) l.splice(i, 1); dbRelease(keyOf(ch), t, gap); }
   persist();
 }
 
@@ -114,7 +153,7 @@ function prune(known) {
   return changed;
 }
 
-function reset() { state.channels = {}; blockedKeys.clear(); persist(); }
+function reset() { state.channels = {}; blockedKeys.clear(); persist(); if (db.ready) db.exec("DELETE FROM sent_dedupe WHERE kind = 'g'").catch(() => {}); }
 setOnShoeReset(() => { try { reset(); } catch (_) { /* ignoré */ } });
 
 function status(channels) {

@@ -205,7 +205,7 @@ async function launch(target, digit, suit, lowPct, meta, kind) {
   if (isDuplicate(target, suit, kind) || inflight.has(key)) { panel.duplicatesBlocked += 1; return false; }
   inflight.add(key);
   // v158 : confirmation de l'écart commune au canal : contrôle + réservation d'un seul geste, AVANT l'envoi ; refusé = pas d'envoi
-  const rv = gapGuard.reserve(channels, target, panel.minGap, 'palier');
+  const rv = await gapGuard.reserve(channels, target, panel.minGap, 'palier');
   if (!rv.ok) { inflight.delete(key); panel.gapBlocked = (panel.gapBlocked || 0) + 1; return false; }
   let sentOk = false;
   try {
@@ -219,7 +219,7 @@ async function launch(target, digit, suit, lowPct, meta, kind) {
     if (!inverse) { panel.lastTarget = target; persist(); } // v148/v157 : dernier numéro prédit gardé tout de suite (référence de l'écart minimum)
     sentOk = true;
     return true;
-  } finally { if (!sentOk) gapGuard.release(channels, target, 'palier'); inflight.delete(key); }
+  } finally { if (!sentOk) gapGuard.release(channels, target, 'palier', panel.minGap); inflight.delete(key); }
 }
 
 // v144 : envoie la décision pour un numéro. Si le réglage « costume déjà venu N fois de suite » a produit un inverse ET qu'un canal de

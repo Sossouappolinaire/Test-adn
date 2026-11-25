@@ -154,7 +154,7 @@ async function launch(target, digit, suit, lowPct, meta) {
   if (isDuplicate(target, suit) || inflight.has(key)) { panel.duplicatesBlocked += 1; return false; }
   inflight.add(key);
   // v158 : confirmation de l'écart commune au canal : contrôle + réservation d'un seul geste, AVANT l'envoi ; refusé = pas d'envoi
-  const rv = gapGuard.reserve(panel.channels, target, panel.minGap, 'egalite');
+  const rv = await gapGuard.reserve(panel.channels, target, panel.minGap, 'egalite');
   if (!rv.ok) { inflight.delete(key); panel.gapSkipped = (panel.gapSkipped || 0) + 1; return false; }
   let sentOk = false;
   try {
@@ -167,7 +167,7 @@ async function launch(target, digit, suit, lowPct, meta) {
     const st = statsOf(); st.sent += 1; if (entry.swapped) st.swapped = (st.swapped || 0) + 1; panel.sentCount += 1; panel.lastSentAt = Date.now(); panel.lastError = null;
     sentOk = true;
     return true;
-  } finally { if (!sentOk) gapGuard.release(panel.channels, target, 'egalite'); inflight.delete(key); }
+  } finally { if (!sentOk) gapGuard.release(panel.channels, target, 'egalite', panel.minGap); inflight.delete(key); }
 }
 // v157 : écart minimum entre deux prédictions — vrai si le numéro n est trop proche (écart < minGap) du dernier numéro prédit (gardé)
 function gapTooClose(n) {
