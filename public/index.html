@@ -4578,8 +4578,9 @@ Faites-en bon usage !
     function gapGuardHtml(g) {
       g = g || {};
       const nums = (g.channels || []).map((c) => `${esc(c.id)} : ${(c.numbers || []).length ? c.numbers.map((n) => '№' + esc(n)).join(', ') : '—'}`).join(' · ');
-      const l = g.last ? `<br>Dernier blocage : №${esc(g.last.target)} (${esc(g.last.by)}) refusé, trop proche du №${esc(g.last.conflictWith)} déjà prédit dans le canal ${esc(g.last.channel)}.` : '';
-      return `<p class="small">🛡️ <b>Confirmation de l'écart</b> : écart de <b>${esc(g.forcedGap ?? 3)}</b> minimum imposé dans chaque canal (jamais moins, toutes les stratégies du Compte parité confondues, et aussi par rapport à toute prédiction publiée dans le canal). Écart non respecté = la prédiction n'est <b>pas envoyée</b>. Derniers numéros prédits : ${nums || '—'} · prédictions bloquées : <b>${esc(g.blocked ?? 0)}</b>.${l}</p>`;
+      const l = g.last ? `<br>Dernier blocage : №${esc(g.last.target)} (${esc(g.last.by)}) refusé, trop proche ${g.last.conflictWith ? `du №${esc(g.last.conflictWith)} déjà prédit` : 'd\'une prédiction déjà réservée par une autre instance du site'} dans le canal ${esc(g.last.channel)}.` : '';
+      const ver = snapshot && snapshot.appVersion ? `<br>Version du site qui tourne : <b>${esc(snapshot.appVersion.version)}</b> (la confirmation de l'écart existe à partir de v158 ; une version plus ancienne n'impose qu'un écart de 2 et sans mémoire commune).` : '';
+      return `<p class="small">🛡️ <b>Confirmation de l'écart</b> : écart de <b>${esc(g.forcedGap ?? 3)}</b> minimum imposé dans chaque canal (jamais moins, toutes les stratégies du Compte parité confondues, et aussi par rapport à toute prédiction publiée dans le canal). Écart non respecté = la prédiction n'est <b>pas envoyée</b>. Derniers numéros prédits : ${nums || '—'} · prédictions bloquées : <b>${esc(g.blocked ?? 0)}</b>.${l}${ver}</p>`;
     }
     // « Palier parité » (voir parity-palier.js) : stratégie branchée sur le Compte parité.
     function parityPalierPage() {
